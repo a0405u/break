@@ -2,6 +2,7 @@
 #include <X11/Xutil.h>
 #include <X11/Xft/Xft.h>
 #include <X11/keysym.h>
+#include <pthread.h>
 #include <ao/ao.h>
 #include <stdio.h>
 #include <string.h>
@@ -14,10 +15,15 @@
 
 /*
     TODO:
-    - Sound
-    - Thread for sound
+    X Sound
+    X Sound Volume
+    X Async sound
     - Time output
-    - Warning
+    - Warning before break
+    - Disable warning
+    - Disable end screen
+    - Snooze
+    - End colors and sound
 */
 
 
@@ -38,6 +44,8 @@ typedef struct config
     char message_font_style[64];
     int margin;
     bool repeat;
+    char sound_path[512];
+    float volume;
 } Config;
 
 
@@ -56,7 +64,8 @@ typedef struct context
 
 
 #pragma pack(push, 1)
-typedef struct {
+typedef struct 
+{
     char     riff[4];
     uint32_t size;
     char     wave[4];
@@ -89,6 +98,8 @@ static void load_defaults(Config *config)
     strcpy(config->message_font_style, "regular");
     config->margin = 12;
     config->repeat = false;
+    strcpy(config->sound_path, "duck.wav");
+    config->volume = 0.1;
 }
 
 
@@ -185,7 +196,35 @@ char *get_font_string(const char *font_name, uint font_size, const char *font_st
 }
 
 
-int play_wav(const char *path)
+static void apply_volume(char *buf, size_t bytes, int bits, float volume)
+{
+    if (volume == 1.0f) return;
+
+    if (bits == 8) {
+        // 8-bit PCM is unsigned
+        for (size_t i = 0; i < bytes; i++) {
+            int s = (unsigned char)buf[i] - 128;
+            s = (int)(s * volume);
+            if (s > 127) s = 127;
+            if (s < -128) s = -128;
+            buf[i] = (char)(s + 128);
+        }
+    }
+    else if (bits == 16) {
+        // 16-bit PCM is signed little-endian
+        int16_t *p = (int16_t*)buf;
+        size_t samples = bytes / 2;
+        for (size_t i = 0; i < samples; i++) {
+            int v = (int)(p[i] * volume);
+            if (v > 32767) v = 32767;
+            if (v < -32768) v = -32768;
+            p[i] = (int16_t)v;
+        }
+    }
+}
+
+
+int play_wav(const char *path, float volume)
 {
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
@@ -199,7 +238,7 @@ int play_wav(const char *path)
     if (memcmp(h.riff, "RIFF", 4) ||
         memcmp(h.wave, "WAVE", 4) ||
         memcmp(h.fmt,  "fmt ", 4) ||
-        h.audio_format != 1)            // must be PCM
+        h.audio_format != 1) // must be PCM
     {
         fclose(f);
         return -1;
@@ -264,6 +303,9 @@ int play_wav(const char *path)
         read -= read % h.block_align;
         if (read == 0) break;
 
+        // Apply volume
+        apply_volume(buffer, read, h.bits_per_sample, volume);
+
         ao_play(dev, buffer, read);
         remaining -= read;
     }
@@ -276,7 +318,6 @@ int play_wav(const char *path)
 
     return 0;
 }
-
 
 
 static void play_sine()
@@ -304,6 +345,37 @@ static void play_sine()
 
     ao_close(device);
     ao_shutdown();
+}
+
+
+typedef struct 
+{
+    char *path;
+    float volume;
+} PlayJob;
+
+
+static void *play_thread(void *arg)
+{
+    PlayJob *job = (PlayJob*)arg;
+    play_wav(job->path, job->volume);
+    free(job->path);
+    free(job);
+    return NULL;
+}
+
+
+int play_wav_async(const char *path, float volume)
+{
+    PlayJob *job = malloc(sizeof(PlayJob));
+    job->path = strdup(path);
+    job->volume = volume;
+
+    pthread_t t;
+    pthread_create(&t, NULL, play_thread, job);
+    pthread_detach(t);
+
+    return 0;
 }
 
 
@@ -394,8 +466,6 @@ int main(int argc, char **argv) {
         if (xft_dpi)
             dpi = atof(xft_dpi);
 
-        char *sound_path = "duck.wav";
-
         // Create fullscreen override-redirect window
         XSetWindowAttributes attrs;
         attrs.override_redirect = True;
@@ -469,7 +539,7 @@ int main(int argc, char **argv) {
         draw_message(config.title, config.message, &context);
 
         // Play sound
-        play_wav(sound_path);
+        play_wav_async(config.sound_path, config.volume);
 
         // Hold for break duration
         sleep(config.break_duration);
@@ -481,7 +551,7 @@ int main(int argc, char **argv) {
         draw_message(config.end_title, config.end_message, &context);
 
         // Play sound
-        play_wav(sound_path);
+        play_wav_async(config.sound_path, config.volume);
 
         // Listen for keypresses
         XSelectInput(display, window, KeyPressMask | ExposureMask);

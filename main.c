@@ -12,89 +12,60 @@
 #include <assert.h>
 #include <ctype.h>
 #include <math.h>
+#include <time.h>
+
+#include "main.h"
 
 /*
     TODO:
-    - Warning before break
-    - Snooze
-    - Time output
     - Disable warning
     - Disable end screen
     - End colors
-    - Return focus
+    - Global commands with breakc
+    - Managed / unmanaged?
+    - Notification?
+    - Enable autostart
+    - Enable autoend
+    - Tray icon
 */
 
+Config config;
 
-typedef struct config 
-{
-    char title[128]; // Break Message Title
-    char message[256]; // Break Message
-    char warning[256]; // Warning Message
-    char end_title[128]; // End Screen Title
-    char end_message[256]; // End Screen Message
-    int timer_duration; // Time before/between Breaks
-    int break_duration; // Duration of Breaks
-    int warning_duration; // Duration of Warning Screen if enabled
-    char font_color[16]; // Main foreground color
-    char background_color[16]; // Backgroung color
-    char font_name[128]; // 
-    int title_font_size;
-    char title_font_style[64];
-    int message_font_size;
-    char message_font_style[64];
-    int margin;
-    bool repeat;
-    char start_sound_path[512];
-    char end_sound_path[512];
-    float volume;
-    uint warning_width;
-    uint warning_height;
-} Config;
+Display *display;
+int screen;
+double dpi;
+int depth;
+Window root;
+XVisualInfo vinfo;
+Visual *visual;
+Colormap colormap;
 
+uint screen_width;
+uint screen_height;
 
-typedef struct context
-{
-    Config *config;
-    Display *display;
-    double dpi;
-    uint window_width;
-    uint window_height;
-    XftDraw *draw_context;
-    XftFont *title_font;
-    XftFont *message_font;
-    XftFont *warning_font;
-    XftColor *font_color;
-} Context;
+XftFont *title_font;
+XftFont *message_font;
+XftFont *warning_font;
+XftFont *hint_font;
 
+XftColor font_color;
+XColor background_color;
 
-#pragma pack(push, 1)
-typedef struct 
-{
-    char     riff[4];
-    uint32_t size;
-    char     wave[4];
-    char     fmt[4];
-    uint32_t fmt_len;
-    uint16_t audio_format;
-    uint16_t num_channels;
-    uint32_t sample_rate;
-    uint32_t byte_rate;
-    uint16_t block_align;
-    uint16_t bits_per_sample;
-} WavHeader;
-#pragma pack(pop)
-
+Window last_focus;
+int revert_to;
 
 static void load_defaults(Config *config)
 {
     strcpy(config->title, "Take a break!");
     strcpy(config->message, "Rest your eyes. Stretch your legs. Breathe. Relax.");
-    strcpy(config->warning, "You need a break...");
+    strcpy(config->warning, "Break starts in %ds");
+    strcpy(config->warning_hint, "space - start, w - snooze, s - skip, q - quit");
     strcpy(config->end_title, "Break has ended!");
     strcpy(config->end_message, "Press any button to continue...");
-    config->timer_duration = 1;
-    config->break_duration = 3;
-    config->warning_duration = 3;
+    config->timer_duration = 28 * 60;
+    config->break_duration = 5 * 60;
+    config->warning_duration = 60;
+    config->snooze_duration = 60;
     strcpy(config->font_color, "#ffffff");
     strcpy(config->background_color, "#000000");
     strcpy(config->font_name, "monospace");
@@ -102,13 +73,50 @@ static void load_defaults(Config *config)
     strcpy(config->title_font_style, "bold");
     config->message_font_size = 12;
     strcpy(config->message_font_style, "regular");
+    config->hint_font_size = 10;
+    strcpy(config->hint_font_style, "regular");
+    config->margin = 12;
+    config->repeat = true;
+    strcpy(config->start_sound_path, "start.wav");
+    strcpy(config->end_sound_path, "end.wav");
+    config->volume = 0.4;
+    config->warning_width = 320; // pt
+    config->warning_height = 96; // pt
+    config->border_width = 2; // px
+    config->border_color = 0x999999;
+}
+
+
+static void load_dev(Config *config)
+{
+    strcpy(config->title, "Take a break!");
+    strcpy(config->message, "Rest your eyes. Stretch your legs. Breathe. Relax.");
+    strcpy(config->warning, "Break starts in %ds");
+    strcpy(config->warning_hint, "space - start, w - snooze, s - skip, q - quit");
+    strcpy(config->end_title, "Break has ended!");
+    strcpy(config->end_message, "Press any button to continue...");
+    config->timer_duration = 1;
+    config->break_duration = 3;
+    config->warning_duration = 3;
+    config->snooze_duration = 3;
+    strcpy(config->font_color, "#ffffff");
+    strcpy(config->background_color, "#000000");
+    strcpy(config->font_name, "monospace");
+    config->title_font_size = 14;
+    strcpy(config->title_font_style, "bold");
+    config->message_font_size = 12;
+    strcpy(config->message_font_style, "regular");
+    config->hint_font_size = 10;
+    strcpy(config->hint_font_style, "regular");
     config->margin = 12;
     config->repeat = false;
     strcpy(config->start_sound_path, "start.wav");
     strcpy(config->end_sound_path, "end.wav");
     config->volume = 0.4;
-    config->warning_width = 256; // pt
-    config->warning_height = 128; // pt
+    config->warning_width = 320; // pt
+    config->warning_height = 96; // pt
+    config->border_width = 2; // px
+    config->border_color = 0x999999;
 }
 
 
@@ -394,42 +402,132 @@ double pt_to_px(double pt, double dpi)
 }
 
 
-static void draw_warning(char *warning_text, uint time, Context *context)
+static void init()
 {
-    Display *display = context->display;
-    double dpi = context->dpi;
-    uint window_width = context->window_width;
-    uint window_height = context->window_height;
-    XftDraw *draw_context = context->draw_context;
-    XftFont *warning_font = context->warning_font;
-    XftColor *font_color = context->font_color;
+    display = XOpenDisplay(NULL);
+    if (!display) {
+        fprintf(stderr, "Can't open display\n");
+        exit(1);
+    }
+
+    screen = DefaultScreen(display);
+    root = RootWindow(display, screen);
+    depth = DefaultDepth(display, screen);
+    visual = DefaultVisual(display, screen);
+    colormap = DefaultColormap(display, screen);
+
+    // if (XMatchVisualInfo(display, screen, 32, TrueColor, &vinfo)) {
+    //     depth = 32;
+    //     visual = vinfo.visual;
+    //     colormap = XCreateColormap(display, root, visual, AllocNone);
+    // }
+
+    screen_width  = DisplayWidth(display, screen);
+    screen_height = DisplayHeight(display, screen);
+
+    // Initialize dpi
+    char *xft_dpi = XGetDefault(display, "Xft", "dpi");
+
+    if (xft_dpi)
+        dpi = atof(xft_dpi);
+    else
+        dpi = 96.0;
+
+    // Load font_color
+    XftColorAllocName(display, visual, colormap, config.font_color, &font_color);
+
+    // Load title font
+    char *title_font_string = get_font_string(config.font_name, config.title_font_size, config.title_font_style);
+    title_font = XftFontOpenName(display, screen, title_font_string);
+    assert(title_font);
+
+    // Load message font
+    char *message_font_string = get_font_string(config.font_name, config.message_font_size, config.message_font_style);
+    message_font = XftFontOpenName(display, screen, message_font_string);
+    assert(message_font);
+
+    warning_font = message_font;
+
+    // Load hint font
+    char *hint_font_string = get_font_string(config.font_name, config.hint_font_size, config.hint_font_style);
+    hint_font = XftFontOpenName(display, screen, hint_font_string);
+    assert(hint_font);
+
+    // Load background color
+    if (XParseColor(display, colormap, config.background_color, &background_color)) 
+        if (!XAllocColor(display, colormap, &background_color))
+            exit(1);
+
+    // Remember current focus
+    XGetInputFocus(display, &last_focus, &revert_to);
+}
+
+
+static void spawn_window(uint width, uint height, int x, int y, int border, XColor *background_color, bool override_redirect, WindowContext *wctx)
+{
+    XSetWindowAttributes attrs;
+    attrs.override_redirect = override_redirect;
+    attrs.background_pixel = background_color->pixel;
+    // attrs.background_pixel = 0;
+    attrs.colormap = colormap;
+
+    // Create Warning window
+    Window window = XCreateWindow(
+        display, root,
+        x, y, width, height, border,
+        depth,
+        InputOutput,
+        visual,
+        CWColormap | CWOverrideRedirect | CWBackPixel,
+        &attrs
+    );
+
+    XMapWindow(display, window);
+    XFlush(display);
+
+    XftDraw *draw_context = XftDrawCreate(display, window, visual, colormap);
+
+    wctx->window = window;
+    wctx->width = width;
+    wctx->height = height;
+    wctx->draw_context = draw_context;
+}
+
+
+static void draw_warning(char *warning_text, char *hint_text, uint time, WindowContext *wctx)
+{
+    // Clear window
+    GC gctx = XCreateGC(display, wctx->window, 0, NULL);
+    XFillRectangle(display, wctx->window, gctx, 0, 0, wctx->width, wctx->height);
+
+    char text[256];
+    sprintf(text, warning_text, time);
 
     // Calculate text extents
     XGlyphInfo warning_extents;
-    XftTextExtentsUtf8(display, warning_font, (XftChar8 *)warning_text, strlen(warning_text), &warning_extents);
+    XftTextExtentsUtf8(display, warning_font, (XftChar8 *)text, strlen(text), &warning_extents);
+    XGlyphInfo hint_extents;
+    XftTextExtentsUtf8(display, hint_font, (XftChar8 *)hint_text, strlen(hint_text), &hint_extents);
 
     // Draw Warning Text
-    int warning_text_x = (window_width - warning_extents.width) / 2;
-    int warning_text_y = (window_height - warning_extents.height) / 2 + warning_extents.height - (warning_extents.height - warning_extents.y);
+    int warning_text_x = (wctx->width - warning_extents.width) / 2;
+    int warning_text_y = (wctx->height - warning_extents.height) / 2 + warning_extents.height - (warning_extents.height - warning_extents.y);
+    XftDrawStringUtf8(wctx->draw_context, &font_color, warning_font, warning_text_x, warning_text_y, (XftChar8 *)text, strlen(text));
 
-    XftDrawStringUtf8(draw_context, font_color, warning_font, warning_text_x, warning_text_y, (XftChar8 *)warning_text, strlen(warning_text));
+    int hint_text_x = (wctx->width - hint_extents.width) / 2;
+    int hint_text_y = wctx->height - hint_extents.height;
+    XftDrawStringUtf8(wctx->draw_context, &font_color, hint_font, hint_text_x, hint_text_y, (XftChar8 *)hint_text, strlen(hint_text));
     
     // Update display
     XFlush(display);
 }
 
 
-static void draw_message(char *title_text, char *message_text, Context *context)
+static void draw_message(char *title_text, char *message_text, WindowContext *wctx)
 {
-    Display *display = context->display;
-    double dpi = context->dpi;
-    uint window_width = context->window_width;
-    uint window_height = context->window_height;
-    XftDraw *draw_context = context->draw_context;
-    XftFont *title_font = context->title_font;
-    XftFont *message_font = context->message_font;
-    XftColor *font_color = context->font_color;
-    uint margin = context->config->margin;
+    // Clear window
+    GC gctx = XCreateGC(display, wctx->window, 0, NULL);
+    XFillRectangle(display, wctx->window, gctx, 0, 0, wctx->width, wctx->height);
 
     // Calculate text extents
     XGlyphInfo title_extents;
@@ -447,14 +545,14 @@ static void draw_message(char *title_text, char *message_text, Context *context)
         c++; // Move past the found newline
     }
 
-    int pixel_margin = pt_to_px(margin, dpi);
+    int pixel_margin = pt_to_px(config.margin, dpi);
     int message_heigth = message_lines_count * message_extents.height + (message_lines_count - 1) * message_extents.height;
 
     // Draw Title
-    int title_text_x = (window_width - title_extents.width) / 2;
-    int title_text_y = (window_height - title_extents.height - message_heigth - pixel_margin) / 2 + title_extents.height - title_extents.y;
+    int title_text_x = (wctx->width - title_extents.width) / 2;
+    int title_text_y = (wctx->height - title_extents.height - message_heigth - pixel_margin) / 2 + title_extents.height - title_extents.y;
 
-    XftDrawStringUtf8(draw_context, font_color, title_font, title_text_x, title_text_y, (XftChar8 *)title_text, strlen(title_text));
+    XftDrawStringUtf8(wctx->draw_context, &font_color, title_font, title_text_x, title_text_y, (XftChar8 *)title_text, strlen(title_text));
     
     // Draw Message line by line
     const char *message_line = strtok(message_text, "\n");
@@ -463,11 +561,11 @@ static void draw_message(char *title_text, char *message_text, Context *context)
         XGlyphInfo message_line_extents;
         XftTextExtentsUtf8(display, message_font, (XftChar8 *)message_line, strlen(message_line), &message_line_extents);
 
-        int message_line_x = (window_width - message_line_extents.width) / 2;
-        int message_start_y = (window_height - title_extents.height - message_heigth - pixel_margin) / 2 + title_extents.height + pixel_margin;
+        int message_line_x = (wctx->width - message_line_extents.width) / 2;
+        int message_start_y = (wctx->height - title_extents.height - message_heigth - pixel_margin) / 2 + title_extents.height + pixel_margin;
         int message_line_y = message_start_y + message_extents.height + message_extents.height * i * 1.5 - message_extents.y;
 
-        XftDrawStringUtf8(draw_context, font_color, message_font, message_line_x, message_line_y, (XftChar8 *)message_line, strlen(message_line));
+        XftDrawStringUtf8(wctx->draw_context, &font_color, message_font, message_line_x, message_line_y, (XftChar8 *)message_line, strlen(message_line));
         message_line = strtok(NULL, "\n");
     }
     // Update display
@@ -475,162 +573,161 @@ static void draw_message(char *title_text, char *message_text, Context *context)
 }
 
 
+int event_wait(Display *display, XEvent *event, int timeout)
+{
+    int fd = ConnectionNumber(display);
+
+    fd_set in_fds;
+    FD_ZERO(&in_fds);
+    FD_SET(fd, &in_fds);
+
+    struct timeval tv;
+    tv.tv_sec  = timeout;
+    tv.tv_usec = 0;
+
+    // Wait until X data is available or timeout
+    int ret = select(fd + 1, &in_fds, NULL, NULL, &tv);
+
+    if (ret > 0) {
+        // We have X events pending
+        XNextEvent(display, event);
+        return 1;
+    } else if (ret == 0) {
+        // Timeout
+        return 0;
+    } else {
+        // Error
+        perror("select");
+        return -1;
+    }
+}
+
+
 int main(int argc, char **argv) {
 
-    Config config;
-    Context context;
-
     load_defaults(&config);
+    load_dev(&config);
     load_config(&config);
 
     do {
         sleep(config.timer_duration);
 
-        Display *display = XOpenDisplay(NULL);
-        if (!display) {
-            fprintf(stderr, "Can't open display\n");
-            return 1;
-        }
+        warn:
 
-        int screen = DefaultScreen(display);
-        Window root = RootWindow(display, screen);
+        init();
 
-        unsigned int screen_width  = DisplayWidth(display, screen);
-        unsigned int screen_height = DisplayHeight(display, screen);
+        // Spawn Warning
+        WindowContext warning_wctx;
 
-        // Initialize dpi
-        double dpi = 96.0;
-        char *xft_dpi = XGetDefault(display, "Xft", "dpi");
-
-        if (xft_dpi)
-            dpi = atof(xft_dpi);
-
-        // Load font_color
-        XftColor font_color;
-        XftColorAllocName(display, DefaultVisual(display, screen), DefaultColormap(display, screen), config.font_color, &font_color);
-
-        // Load title font
-        char *title_font_string = get_font_string(config.font_name, config.title_font_size, config.title_font_style);
-        XftFont *title_font = XftFontOpenName(display, screen, title_font_string);
-        assert(title_font);
-
-        // Load message font
-        char *message_font_string = get_font_string(config.font_name, config.message_font_size, config.message_font_style);
-        XftFont *message_font = XftFontOpenName(display, screen, message_font_string);
-        assert(message_font);
-
-        // Load background color
-        Colormap colormap = DefaultColormap(display, screen);
-        XColor background_color;
-
-        // Remember current focus
-        Window previous_focus;
-        int revert_to;
-
-        XGetInputFocus(display, &previous_focus, &revert_to);
-
-        // Draw Warning
         uint warning_width = pt_to_px(config.warning_width, dpi);
         uint warning_height = pt_to_px(config.warning_height, dpi);
 
-        int x = (screen_width  - warning_width) / 2;
-        int y = (screen_height - warning_height) / 2;
+        int warning_x = (screen_width  - warning_width) / 2;
+        int warning_y = (screen_height - warning_height) / 2;
 
-        XSetWindowAttributes warning_attrs;
-        warning_attrs.override_redirect = false;
-        warning_attrs.background_pixel  = BlackPixel(display, screen);
+        spawn_window(warning_width, warning_height, warning_x, warning_y, config.border_width, &background_color, true, &warning_wctx);
 
-        if (XParseColor(display, colormap, config.background_color, &background_color)) 
-            if (XAllocColor(display, colormap, &background_color)) 
-                warning_attrs.background_pixel = background_color.pixel;
+        // Manage window focus
+        XRaiseWindow(display, warning_wctx.window);
+        XSetInputFocus(display, warning_wctx.window, RevertToNone, CurrentTime);      
+        XSetWindowBorder(display, warning_wctx.window, config.border_color);
+        XFlush(display);  
 
-        // Create Warning window
-        Window warning_window = XCreateWindow(
-            display, RootWindow(display, screen),
-            x, y, warning_width, warning_height, 0,
-            DefaultDepth(display, screen),
-            InputOutput,
-            DefaultVisual(display, screen),
-            CWOverrideRedirect | CWBackPixel,
-            &warning_attrs
-        );
+        // XGrabKeyboard(display, warning_wctx.window,
+        //             True,
+        //             GrabModeAsync, GrabModeAsync,
+        //             CurrentTime);
 
-        XMapWindow(display, warning_window);
-        XFlush(display);
+        // Listen for keypresses
+        XSelectInput(display, warning_wctx.window, KeyPressMask | ButtonPressMask |ExposureMask);
 
-        // Create draw context
-        XftDraw *warning_draw_context = XftDrawCreate(display, warning_window,
-                                        DefaultVisual(display, screen),
-                                        DefaultColormap(display, screen));
+        double warning_time = config.warning_duration;
 
-        context.config = &config;
-        context.display = display;
-        context.dpi = dpi;
-        context.font_color = &font_color;
-
-        context.draw_context = warning_draw_context;
-        context.warning_font = message_font;
-        context.window_width = warning_width;
-        context.window_height = warning_height;
-        
         // Draw Warning message
-        draw_warning(config.warning, 3, &context);
+        // draw_warning(config.warning, config.warning_hint, warning_time, &warning_wctx);
 
-        XRaiseWindow(display, warning_window);
-        XSetInputFocus(display, warning_window, RevertToNone, CurrentTime);        
+        XEvent event;
+        time_t time_start = time(NULL);
+        time_t time_left = warning_time - (time(NULL) - time_start);
 
-        sleep(config.warning_duration);
+        while (true) 
+        {
+            time_left = warning_time - (time(NULL) - time_start);
+            if (time_left < 0)
+                goto start_break;
+            draw_warning(config.warning, config.warning_hint, time_left, &warning_wctx);
 
-        // Create fullscreen override-redirect window
-        XSetWindowAttributes attrs;
-        attrs.override_redirect = true;
-        attrs.background_pixel = BlackPixel(display, screen);
+            event_wait(display, &event, 1);
+            switch (event.type)
+            {
+                case ButtonPress:
+                {
+                    XSetInputFocus(display, warning_wctx.window, RevertToPointerRoot, CurrentTime);
+                    break;
+                }
+                case KeyPress:
+                {
+                    KeySym key = XLookupKeysym(&event.xkey, 0);
+                    switch (key)
+                    {
+                        case XK_space: 
+                        {
+                            goto start_break;
+                            break;
+                        }
+                        case XK_w: // Snooze
+                        {
+                            // XUngrabKeyboard(display, CurrentTime);
+                            // XUngrabPointer(display, CurrentTime);
+                            XDestroyWindow(display, warning_wctx.window);
+                            XSetInputFocus(display, last_focus, RevertToNone, CurrentTime);
+                            XFlush(display);
 
-        if (XParseColor(display, colormap, config.background_color, &background_color)) 
-            if (XAllocColor(display, colormap, &background_color)) 
-                attrs.background_pixel = background_color.pixel;
+                            sleep(config.snooze_duration);
+                            goto warn;
+                            break;
+                        }
+                        case XK_s: // Skip
+                        {
+                            goto skip_break;
+                            break;
+                        }
+                        case XK_q: // Quit
+                        {
+                            XUngrabKeyboard(display, CurrentTime);
+                            XUngrabPointer(display, CurrentTime);
+                            XDestroyWindow(display, warning_wctx.window);
+                            XSetInputFocus(display, last_focus, RevertToNone, CurrentTime);
+                            XCloseDisplay(display);
+                            return 0;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        start_break:
 
-        // Create window
-        Window window = XCreateWindow(
-            display,
-            root,
-            0, 0, screen_width, screen_height,
-            0,
-            DefaultDepth(display, screen),
-            InputOutput,
-            DefaultVisual(display, screen),
-            CWOverrideRedirect | CWBackPixel,
-            &attrs
-        );
+        // Spawn Break window
+        WindowContext break_wctx;
+        spawn_window(screen_width, screen_height, 0, 0, 0, &background_color, true, &break_wctx);
 
-        XMapWindow(display, window);
-        XDestroyWindow(display, warning_window);
+        XDestroyWindow(display, warning_wctx.window);
         XFlush(display);
 
         // Try to grab pointer and keyboard
-        XGrabPointer(display, window, True,
+        XGrabPointer(display, break_wctx.window, True,
                     ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
                     GrabModeAsync, GrabModeAsync,
                     None, None, CurrentTime);
 
-        XGrabKeyboard(display, window,
+        XGrabKeyboard(display, break_wctx.window,
                     True,
                     GrabModeAsync, GrabModeAsync,
                     CurrentTime);
-
-        // Create draw context
-        XftDraw *message_draw_context = XftDrawCreate(display, window,
-                                        DefaultVisual(display, screen),
-                                        DefaultColormap(display, screen));
-
-        context.window_width = screen_width;
-        context.window_height = screen_height;
-        context.draw_context = message_draw_context;
-        context.message_font = message_font;
-        context.title_font = title_font;
         
         // Draw break message
-        draw_message(config.title, config.message, &context);
+        draw_message(config.title, config.message, &break_wctx);
 
         // Play sound
         play_wav_async(config.start_sound_path, config.volume);
@@ -638,42 +735,30 @@ int main(int argc, char **argv) {
         // Hold for break duration
         sleep(config.break_duration);
 
-        GC graphics_context = XCreateGC(display, window, 0, NULL);
-        XFillRectangle(display, window, graphics_context, 0, 0, screen_width, screen_height);
-
         // Draw end message
-        draw_message(config.end_title, config.end_message, &context);
+        draw_message(config.end_title, config.end_message, &break_wctx);
 
         // Play sound
         play_wav_async(config.end_sound_path, config.volume);
 
         // Listen for keypresses
-        XSelectInput(display, window, KeyPressMask | ExposureMask);
+        XSelectInput(display, break_wctx.window, KeyPressMask | ExposureMask);
 
-        XEvent event;
-        int running = 1;
-
-        while (running) 
+        while (true) 
         {
             XNextEvent(display, &event);
-            switch (event.type) 
+            if (event.type == KeyPress) 
             {
-                case KeyPress: {
-                    KeySym key = XLookupKeysym(&event.xkey, 0);
-                    running = 0;
-                    break;
-                }
+                KeySym key = XLookupKeysym(&event.xkey, 0);
+                break;
             }
         }
 
-        // Cleanup + release
         XUngrabKeyboard(display, CurrentTime);
         XUngrabPointer(display, CurrentTime);
-
-        XDestroyWindow(display, window);
-        // Restore focus
-        XSetInputFocus(display, previous_focus, RevertToNone, CurrentTime);
-
+        XDestroyWindow(display, break_wctx.window);
+        skip_break:
+        XSetInputFocus(display, last_focus, RevertToNone, CurrentTime);
         XCloseDisplay(display);
 
     } while (config.repeat);

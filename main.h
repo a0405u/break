@@ -14,10 +14,16 @@ typedef struct
     char background_color[16]; // Backgroung color
     char font_name[128]; // Main font name
     int title_font_size;
+    int title_font_slant;
+    int title_font_weight;
     char title_font_style[64];
     int message_font_size;
+    int message_font_slant;
+    int message_font_weight;
     char message_font_style[64];
     int hint_font_size;
+    int hint_font_slant;
+    int hint_font_weight;
     char hint_font_style[64];
     int margin;
     bool repeat;
@@ -27,7 +33,7 @@ typedef struct
     uint warning_width;
     uint warning_height;
     uint border_width;
-    unsigned long border_color;
+    char border_color[16];
 } Config;
 
 

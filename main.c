@@ -29,6 +29,8 @@
     - Tray icon
 */
 
+bool debug = false;
+
 Config config;
 
 Display *display;
@@ -50,6 +52,7 @@ XftFont *hint_font;
 
 XftColor font_color;
 XColor background_color;
+XColor border_color;
 
 Window last_focus;
 int revert_to;
@@ -58,65 +61,53 @@ static void load_defaults(Config *config)
 {
     strcpy(config->title, "Take a break!");
     strcpy(config->message, "Rest your eyes. Stretch your legs. Breathe. Relax.");
-    strcpy(config->warning, "Break starts in %ds");
+    strcpy(config->warning, "Break starts in %ds.");
     strcpy(config->warning_hint, "space - start, w - snooze, s - skip, q - quit");
     strcpy(config->end_title, "Break has ended!");
-    strcpy(config->end_message, "Press any button to continue...");
+    strcpy(config->end_message, "Press any key to continue...");
+
     config->timer_duration = 28 * 60;
     config->break_duration = 5 * 60;
     config->warning_duration = 60;
     config->snooze_duration = 60;
+    config->repeat = true;
+
     strcpy(config->font_color, "#ffffff");
     strcpy(config->background_color, "#000000");
-    strcpy(config->font_name, "monospace");
-    config->title_font_size = 14;
-    strcpy(config->title_font_style, "bold");
-    config->message_font_size = 12;
-    strcpy(config->message_font_style, "regular");
-    config->hint_font_size = 10;
-    strcpy(config->hint_font_style, "regular");
-    config->margin = 12;
-    config->repeat = true;
-    strcpy(config->start_sound_path, "start.wav");
-    strcpy(config->end_sound_path, "end.wav");
-    config->volume = 0.4;
     config->warning_width = 320; // pt
     config->warning_height = 96; // pt
-    config->border_width = 2; // px
-    config->border_color = 0x999999;
+    config->border_width = 0; // px
+    strcpy(config->border_color, "#333333");
+    config->margin = 12;
+    strcpy(config->font_name, "monospace");
+
+    config->title_font_size = 14;
+    config->title_font_weight = 300;
+    config->title_font_slant = 0;
+    strcpy(config->title_font_style, "regular");
+
+    config->message_font_size = 12;
+    config->message_font_weight = 200;
+    config->message_font_slant = 0;
+    strcpy(config->message_font_style, "regular");
+
+    config->hint_font_size = 10;
+    config->hint_font_weight = 100;
+    config->hint_font_slant = 100;
+    strcpy(config->hint_font_style, "regular");
+
+    strcpy(config->start_sound_path, "start.wav");
+    strcpy(config->end_sound_path, "end.wav");
+    config->volume = 0.8;
 }
 
 
 static void load_dev(Config *config)
 {
-    strcpy(config->title, "Take a break!");
-    strcpy(config->message, "Rest your eyes. Stretch your legs. Breathe. Relax.");
-    strcpy(config->warning, "Break starts in %ds");
-    strcpy(config->warning_hint, "space - start, w - snooze, s - skip, q - quit");
-    strcpy(config->end_title, "Break has ended!");
-    strcpy(config->end_message, "Press any button to continue...");
     config->timer_duration = 1;
     config->break_duration = 3;
     config->warning_duration = 3;
     config->snooze_duration = 3;
-    strcpy(config->font_color, "#ffffff");
-    strcpy(config->background_color, "#000000");
-    strcpy(config->font_name, "monospace");
-    config->title_font_size = 14;
-    strcpy(config->title_font_style, "bold");
-    config->message_font_size = 12;
-    strcpy(config->message_font_style, "regular");
-    config->hint_font_size = 10;
-    strcpy(config->hint_font_style, "regular");
-    config->margin = 12;
-    config->repeat = false;
-    strcpy(config->start_sound_path, "start.wav");
-    strcpy(config->end_sound_path, "end.wav");
-    config->volume = 0.4;
-    config->warning_width = 320; // pt
-    config->warning_height = 96; // pt
-    config->border_width = 2; // px
-    config->border_color = 0x999999;
 }
 
 
@@ -126,21 +117,64 @@ static void get_config_path(char *buffer, size_t length)
     const char *home = getenv("HOME");
 
     if (xdg)
-        snprintf(buffer, length, "%s/xbreak/config", xdg);
+        snprintf(buffer, length, "%s/break/config", xdg);
     else if (home)
-        snprintf(buffer, length, "%s/.config/xbreak/config", home);
+        snprintf(buffer, length, "%s/.config/break/config", home);
     else
         snprintf(buffer, length, "config");
 }
 
 
-void trim(char* str) {
+void trim(char* str) 
+{
     char* start = str;
     while (isspace((unsigned char)*start)) start++;
     memmove(str, start, strlen(start) + 1);
 
     char* end = str + strlen(str) - 1;
     while (end > str && isspace((unsigned char)*end)) *end-- = '\0';
+}
+
+
+int parse_duration(const char *str) 
+{
+    int total = 0;
+    int value = 0;
+
+    while (*str) {
+        if (isdigit((unsigned char)*str)) 
+        {
+            value = value * 10 + (*str - '0');
+        } 
+        else 
+        {
+            if (*str == 'h') 
+            {
+                total += value * 3600;
+                value = 0;
+            } else if (*str == 'm') 
+            {
+                total += value * 60;
+                value = 0;
+            } else if (*str == 's') 
+            {
+                total += value;
+                value = 0;
+            }
+        }
+        str++;
+    }
+
+    return total;
+}
+
+
+unsigned int parse_color(const char *str) 
+{
+    if (*str == '#')
+        str++;  // skip '#'
+
+    return (unsigned int)strtoul(str, NULL, 16);
 }
 
 
@@ -170,6 +204,10 @@ static void load_config(Config *config)
         #define SET_INT(field) \
             if (strcmp(key, #field) == 0) \
                 config->field = atoi(value)
+        
+        #define SET_FLOAT(field) \
+            if (strcmp(key, #field) == 0) \
+                config->field = atof(value)
 
         #define SET_STRING(field) \
             if (strcmp(key, #field) == 0) \
@@ -181,34 +219,67 @@ static void load_config(Config *config)
         #define SET_BOOL(field) \
             if (strcmp(key, #field) == 0) \
                 config->field = strcmp(value, "true") == 0;
+        
+        #define SET_DURATION(field) \
+            if (strcmp(key, #field) == 0) \
+                config->field = parse_duration(value);
+        
+        #define SET_COLOR(field) \
+            if (strcmp(key, #field) == 0) \
+                config->field = parse_color(value);
 
         SET_STRING(title);
         SET_STRING(message);
+        SET_STRING(warning);
+        SET_STRING(warning_hint);
         SET_STRING(end_title);
         SET_STRING(end_message);
-        SET_INT(timer_duration);
-        SET_INT(break_duration);
+
+        SET_DURATION(timer_duration);
+        SET_DURATION(break_duration);
+        SET_DURATION(warning_duration);
+        SET_DURATION(snooze_duration);
+        SET_BOOL(repeat);
+
         SET_STRING(font_color);
         SET_STRING(background_color);
-        SET_STRING(font_name);
-        SET_INT(title_font_size);
-        SET_STRING(title_font_style);
-        SET_INT(message_font_size);
-        SET_STRING(message_font_style);
+        SET_INT(border_width);
+        SET_STRING(border_color);
+        SET_INT(warning_width);
+        SET_INT(warning_height);
         SET_INT(margin);
-        SET_BOOL(repeat);
+        SET_STRING(font_name);
+
+        SET_INT(title_font_size);
+        SET_INT(title_font_slant);
+        SET_INT(title_font_weight);
+        SET_STRING(title_font_style);
+
+        SET_INT(message_font_size);
+        SET_INT(message_font_slant);
+        SET_INT(message_font_weight);
+        SET_STRING(message_font_style);
+
+        SET_INT(hint_font_size);
+        SET_INT(hint_font_slant);
+        SET_INT(hint_font_weight);
+        SET_STRING(hint_font_style);
+
+        SET_STRING(start_sound_path);
+        SET_STRING(end_sound_path);
+        SET_FLOAT(volume);
     }
     fclose(f);
 }
 
 
-char *get_font_string(const char *font_name, uint font_size, const char *font_style)
+char *get_font_string(const char *font_name, uint font_size, const char *font_style, uint font_weight, uint font_slant)
 {
-    char *fstring = "%s:style=%s:size=%u";
-    int size = snprintf(NULL, 0, fstring, font_name, font_style, font_size);
+    char *fstring = "%s:style=%s:size=%u:weight=%d:slant=%d";
+    int size = snprintf(NULL, 0, fstring, font_name, font_style, font_size, font_weight, font_slant);
     char *string = malloc(size + 1);
     assert(string);
-    snprintf(string, size + 1, fstring, font_name, font_style, font_size);
+    snprintf(string, size + 1, fstring, font_name, font_style, font_size, font_weight, font_slant);
     return string;
 }
 
@@ -217,9 +288,11 @@ static void apply_volume(char *buf, size_t bytes, int bits, float volume)
 {
     if (volume == 1.0f) return;
 
-    if (bits == 8) {
+    if (bits == 8) 
+    {
         // 8-bit PCM is unsigned
-        for (size_t i = 0; i < bytes; i++) {
+        for (size_t i = 0; i < bytes; i++) 
+        {
             int s = (unsigned char)buf[i] - 128;
             s = (int)(s * volume);
             if (s > 127) s = 127;
@@ -227,11 +300,13 @@ static void apply_volume(char *buf, size_t bytes, int bits, float volume)
             buf[i] = (char)(s + 128);
         }
     }
-    else if (bits == 16) {
+    else if (bits == 16) 
+    {
         // 16-bit PCM is signed little-endian
         int16_t *p = (int16_t*)buf;
         size_t samples = bytes / 2;
-        for (size_t i = 0; i < samples; i++) {
+        for (size_t i = 0; i < samples; i++) 
+        {
             int v = (int)(p[i] * volume);
             if (v > 32767) v = 32767;
             if (v < -32768) v = -32768;
@@ -247,7 +322,8 @@ int play_wav(const char *path, float volume)
     if (!f) return -1;
 
     WavHeader h;
-    if (fread(&h, sizeof(h), 1, f) != 1) {
+    if (fread(&h, sizeof(h), 1, f) != 1) 
+    {
         fclose(f);
         return -1;
     }
@@ -262,7 +338,8 @@ int play_wav(const char *path, float volume)
     }
 
     // Skip extra fmt bytes if present
-    if (h.fmt_len > 16) {
+    if (h.fmt_len > 16) 
+    {
         fseek(f, h.fmt_len - 16, SEEK_CUR);
     }
 
@@ -270,7 +347,8 @@ int play_wav(const char *path, float volume)
     char tag[4];
     uint32_t chunk_size = 0;
 
-    while (fread(tag, 1, 4, f) == 4) {
+    while (fread(tag, 1, 4, f) == 4) 
+    {
         fread(&chunk_size, 4, 1, f);
 
         if (!memcmp(tag, "data", 4)) {
@@ -295,7 +373,8 @@ int play_wav(const char *path, float volume)
     };
 
     ao_device *dev = ao_open_live(driver, &fmt, NULL);
-    if (!dev) {
+    if (!dev) 
+    {
         ao_shutdown();
         fclose(f);
         return -1;
@@ -304,14 +383,16 @@ int play_wav(const char *path, float volume)
     // Streaming loop
     const size_t buf_size = 4096;
     char *buffer = malloc(buf_size);
-    if (!buffer) {
+    if (!buffer) 
+    {
         ao_close(dev);
         ao_shutdown();
         fclose(f);
         return -1;
     }
 
-    while (remaining > 0) {
+    while (remaining > 0) 
+    {
         size_t to_read = remaining < buf_size ? remaining : buf_size;
         size_t read = fread(buffer, 1, to_read, f);
         if (read == 0) break;
@@ -437,25 +518,45 @@ static void init()
     XftColorAllocName(display, visual, colormap, config.font_color, &font_color);
 
     // Load title font
-    char *title_font_string = get_font_string(config.font_name, config.title_font_size, config.title_font_style);
+    char *title_font_string = get_font_string(
+        config.font_name, 
+        config.title_font_size, 
+        config.title_font_style, 
+        config.title_font_weight, 
+        config.title_font_slant);
     title_font = XftFontOpenName(display, screen, title_font_string);
     assert(title_font);
 
     // Load message font
-    char *message_font_string = get_font_string(config.font_name, config.message_font_size, config.message_font_style);
+    char *message_font_string = get_font_string(
+        config.font_name, 
+        config.message_font_size, 
+        config.message_font_style, 
+        config.message_font_weight,
+        config.message_font_slant);
     message_font = XftFontOpenName(display, screen, message_font_string);
     assert(message_font);
 
     warning_font = message_font;
 
     // Load hint font
-    char *hint_font_string = get_font_string(config.font_name, config.hint_font_size, config.hint_font_style);
+    char *hint_font_string = get_font_string(
+        config.font_name, 
+        config.hint_font_size, 
+        config.hint_font_style, 
+        config.hint_font_weight,
+        config.hint_font_slant);
     hint_font = XftFontOpenName(display, screen, hint_font_string);
     assert(hint_font);
 
     // Load background color
     if (XParseColor(display, colormap, config.background_color, &background_color)) 
         if (!XAllocColor(display, colormap, &background_color))
+            exit(1);
+
+    // Load border color
+    if (XParseColor(display, colormap, config.border_color, &border_color)) 
+        if (!XAllocColor(display, colormap, &border_color))
             exit(1);
 
     // Remember current focus
@@ -603,11 +704,18 @@ int event_wait(Display *display, XEvent *event, int timeout)
 }
 
 
-int main(int argc, char **argv) {
-
+int main(int argc, char **argv) 
+{
     load_defaults(&config);
-    load_dev(&config);
     load_config(&config);
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-d") == 0) {
+            debug = true;
+            load_dev(&config);
+            printf("Debug mode enabled!\n");
+        }
+    }
 
     do {
         sleep(config.timer_duration);
@@ -630,7 +738,7 @@ int main(int argc, char **argv) {
         // Manage window focus
         XRaiseWindow(display, warning_wctx.window);
         XSetInputFocus(display, warning_wctx.window, RevertToNone, CurrentTime);      
-        XSetWindowBorder(display, warning_wctx.window, config.border_color);
+        XSetWindowBorder(display, warning_wctx.window, border_color.pixel);
         XFlush(display);  
 
         // XGrabKeyboard(display, warning_wctx.window,
@@ -657,52 +765,58 @@ int main(int argc, char **argv) {
                 goto start_break;
             draw_warning(config.warning, config.warning_hint, time_left, &warning_wctx);
 
-            event_wait(display, &event, 1);
-            switch (event.type)
+            if (event_wait(display, &event, 1) > 0)
             {
-                case ButtonPress:
+                switch (event.type)
                 {
-                    XSetInputFocus(display, warning_wctx.window, RevertToPointerRoot, CurrentTime);
-                    break;
-                }
-                case KeyPress:
-                {
-                    KeySym key = XLookupKeysym(&event.xkey, 0);
-                    switch (key)
+                    case ButtonPress:
                     {
-                        case XK_space: 
-                        {
-                            goto start_break;
-                            break;
-                        }
-                        case XK_w: // Snooze
-                        {
-                            // XUngrabKeyboard(display, CurrentTime);
-                            // XUngrabPointer(display, CurrentTime);
-                            XDestroyWindow(display, warning_wctx.window);
-                            XSetInputFocus(display, last_focus, RevertToNone, CurrentTime);
-                            XFlush(display);
-
-                            sleep(config.snooze_duration);
-                            goto warn;
-                            break;
-                        }
-                        case XK_s: // Skip
-                        {
-                            goto skip_break;
-                            break;
-                        }
-                        case XK_q: // Quit
-                        {
-                            XUngrabKeyboard(display, CurrentTime);
-                            XUngrabPointer(display, CurrentTime);
-                            XDestroyWindow(display, warning_wctx.window);
-                            XSetInputFocus(display, last_focus, RevertToNone, CurrentTime);
-                            XCloseDisplay(display);
-                            return 0;
-                        }
+                        XSetInputFocus(display, warning_wctx.window, RevertToPointerRoot, CurrentTime);
+                        break;
                     }
-                    break;
+                    case KeyPress:
+                    {
+                        KeySym key = XLookupKeysym(&event.xkey, 0);
+                        switch (key)
+                        {
+                            case XK_space: 
+                            {
+                                printf("Breaking...\n");
+                                goto start_break;
+                                break;
+                            }
+                            case XK_w: // Snooze
+                            {
+                                printf("Snoozing...\n");
+                                // XUngrabKeyboard(display, CurrentTime);
+                                // XUngrabPointer(display, CurrentTime);
+                                XDestroyWindow(display, warning_wctx.window);
+                                XSetInputFocus(display, last_focus, RevertToNone, CurrentTime);
+                                XFlush(display);
+
+                                sleep(config.snooze_duration);
+                                goto warn;
+                                break;
+                            }
+                            case XK_s: // Skip
+                            {
+                                printf("Skipping...\n");
+                                goto skip_break;
+                                break;
+                            }
+                            case XK_q: // Quit
+                            {
+                                printf("Quitting...\n");
+                                XUngrabKeyboard(display, CurrentTime);
+                                XUngrabPointer(display, CurrentTime);
+                                XDestroyWindow(display, warning_wctx.window);
+                                XSetInputFocus(display, last_focus, RevertToNone, CurrentTime);
+                                XCloseDisplay(display);
+                                return 0;
+                            }
+                        }
+                        break;
+                    }
                 }
             }
         }

@@ -27,6 +27,9 @@ typedef struct
     char hint_font_style[64];
     int margin;
     bool repeat;
+    char progress_color[16];
+    int progress_weight;
+    int fps;
     char start_sound_path[512];
     char end_sound_path[512];
     float volume;
@@ -42,7 +45,9 @@ typedef struct wctx
     Window window;
     uint width;
     uint height;
+    Pixmap draw_buffer;
     XftDraw *draw_context;
+    GC graphics_context;
 } WindowContext;
 
 

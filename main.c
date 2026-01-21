@@ -20,7 +20,12 @@
 /*
     TODO:
     - Bug: input while break
+    - Toggle warning
+    - Toggle skip
+    - Toggle snooze
+    - Toggle stop
     - Stop break
+    - Separate audio.c, audio.h
     - Break time output
     - Time output bar
     - Disable warning
@@ -36,37 +41,6 @@
     - Save previous focus on focusing
     - Huge time left on the background
 */
-
-bool debug = false;
-
-Config config;
-
-Display *display;
-int screen;
-double dpi;
-int depth;
-Window root;
-XVisualInfo vinfo;
-Visual *visual;
-Colormap colormap;
-
-uint screen_width;
-uint screen_height;
-
-XftFont *title_font;
-XftFont *message_font;
-XftFont *warning_font;
-XftFont *hint_font;
-
-XftColor font_color;
-XColor background_color;
-XColor border_color;
-XColor progress_color;
-
-Window last_focus;
-int revert_to;
-
-double progress;
 
 static void load_defaults(Config *config)
 {
@@ -498,118 +472,116 @@ double pt_to_px(double pt, double dpi)
 }
 
 
-static void init()
+static void die(const char *msg)
 {
-    display = XOpenDisplay(NULL);
-    if (!display) {
-        fprintf(stderr, "Can't open display\n");
-        exit(1);
-    }
-
-    screen = DefaultScreen(display);
-    root = RootWindow(display, screen);
-    depth = DefaultDepth(display, screen);
-    visual = DefaultVisual(display, screen);
-    colormap = DefaultColormap(display, screen);
-
-    // if (XMatchVisualInfo(display, screen, 32, TrueColor, &vinfo)) {
-    //     depth = 32;
-    //     visual = vinfo.visual;
-    //     colormap = XCreateColormap(display, root, visual, AllocNone);
-    // }
-
-    screen_width  = DisplayWidth(display, screen);
-    screen_height = DisplayHeight(display, screen);
-
-    // Initialize dpi
-    char *xft_dpi = XGetDefault(display, "Xft", "dpi");
-
-    if (xft_dpi)
-        dpi = atof(xft_dpi);
-    else
-        dpi = 96.0;
-
-    // Load font_color
-    XftColorAllocName(display, visual, colormap, config.font_color, &font_color);
-
-    // Load title font
-    char *title_font_string = get_font_string(
-        config.font_name, 
-        config.title_font_size, 
-        config.title_font_style, 
-        config.title_font_weight, 
-        config.title_font_slant);
-    title_font = XftFontOpenName(display, screen, title_font_string);
-    assert(title_font);
-
-    // Load message font
-    char *message_font_string = get_font_string(
-        config.font_name, 
-        config.message_font_size, 
-        config.message_font_style, 
-        config.message_font_weight,
-        config.message_font_slant);
-    message_font = XftFontOpenName(display, screen, message_font_string);
-    assert(message_font);
-
-    warning_font = message_font;
-
-    // Load hint font
-    char *hint_font_string = get_font_string(
-        config.font_name, 
-        config.hint_font_size, 
-        config.hint_font_style, 
-        config.hint_font_weight,
-        config.hint_font_slant);
-    hint_font = XftFontOpenName(display, screen, hint_font_string);
-    assert(hint_font);
-
-    // Load background color
-    if (XParseColor(display, colormap, config.background_color, &background_color)) 
-        if (!XAllocColor(display, colormap, &background_color))
-            exit(1);
-
-    // Load border color
-    if (XParseColor(display, colormap, config.border_color, &border_color)) 
-        if (!XAllocColor(display, colormap, &border_color))
-            exit(1);
-
-    if (XParseColor(display, colormap, config.progress_color, &progress_color))
-        if (!XAllocColor(display, colormap, &progress_color))
-            exit(1);
-
-    // Remember current focus
-    XGetInputFocus(display, &last_focus, &revert_to);
+    fprintf(stderr, "%s\n", msg);
+    exit(1);
 }
 
 
-static void spawn_window(uint width, uint height, int x, int y, int border, XColor *background_color, bool override_redirect, WindowContext *wctx)
+static void load_color(GlobalContext *gctx, const char *name, XColor *out)
 {
+    if (!XParseColor(gctx->display, gctx->colormap, name, out) ||
+        !XAllocColor(gctx->display, gctx->colormap, out))
+    {
+        die("Failed to load color!\n");
+    }
+}
+
+
+static void load_xft_color(GlobalContext *gctx, const char *name, XftColor *out)
+{
+    if (!XftColorAllocName(gctx->display, gctx->visual, gctx->colormap, name, out))
+    {
+        die("Failed to load xft color!\n");
+    }
+}
+
+
+static XftFont *load_xft_font(GlobalContext *gctx, const char *family, int size, char *style, int weight, int slant)
+{
+    char *font_str = get_font_string(family, size, style, weight, slant);
+    XftFont *font = XftFontOpenName(gctx->display, gctx->screen, font_str);
+
+    if (!font)
+        die("Failed to load xft font!");
+
+    return font;
+}
+
+
+static void init(GlobalContext *gctx)
+{
+    gctx->display = XOpenDisplay(NULL);
+    if (!gctx->display)
+        die("Can't open display\n");
+
+    gctx->screen = DefaultScreen(gctx->display);
+    gctx->root   = RootWindow(gctx->display, gctx->screen);
+    gctx->depth  = DefaultDepth(gctx->display, gctx->screen);
+    gctx->visual = DefaultVisual(gctx->display, gctx->screen);
+    gctx->colormap = DefaultColormap(gctx->display, gctx->screen);
+
+    gctx->screen_width  = DisplayWidth(gctx->display, gctx->screen);
+    gctx->screen_height = DisplayHeight(gctx->display, gctx->screen);
+
+    gctx->frame_time = 1.0d / gctx->config.fps;
+
+    /*
+    // Possible transparency
+    if (XMatchVisualInfo(gctx->display, gctx->screen, 32, TrueColor, &gctx->vinfo)) 
+    {
+        gctx->depth = 32;
+        gctx->visual = gctx->vinfo.visual;
+        gctx->colormap = XCreateColormap(
+            gctx->display, gctx->root, gctx->visual, AllocNone
+        );
+    }
+    */
+
+    /* --- DPI --- */
+    const char *xft_dpi = XGetDefault(gctx->display, "Xft", "dpi");
+    gctx->dpi = xft_dpi ? atof(xft_dpi) : 96.0;
+
+    /* --- COLORS --- */
+    load_xft_color(gctx, gctx->config.font_color, &gctx->font_color);
+    load_color(gctx, gctx->config.background_color, &gctx->background_color);
+    load_color(gctx, gctx->config.border_color, &gctx->border_color);
+    load_color(gctx, gctx->config.progress_color, &gctx->progress_color); 
+
+    /* ---- FONTS ---- */
+    gctx->title_font = load_xft_font(gctx, gctx->config.font_name, gctx->config.title_font_size, gctx->config.title_font_style, gctx->config.title_font_weight, gctx->config.title_font_slant);
+
+    gctx->message_font = load_xft_font(gctx, gctx->config.font_name, gctx->config.message_font_size, gctx->config.message_font_style, gctx->config.message_font_weight, gctx->config.message_font_slant);
+
+    gctx->warning_font = gctx->message_font;
+
+    gctx->hint_font = load_xft_font(gctx, gctx->config.font_name, gctx->config.hint_font_size, gctx->config.hint_font_style, gctx->config.hint_font_weight, gctx->config.hint_font_slant);
+
+    /* ---- FOCUS ---- */
+    XGetInputFocus(gctx->display, &gctx->last_focus, &gctx->revert_to);
+}
+
+static void spawn_window(GlobalContext *gctx, uint width, uint height, int x, int y, int border, XColor *background_color, bool override_redirect)
+{
+    WindowContext *wctx = &gctx->wctx;
+
     XSetWindowAttributes attrs;
     attrs.override_redirect = override_redirect;
     attrs.background_pixel = background_color->pixel;
     // attrs.background_pixel = 0;
-    attrs.colormap = colormap;
+    attrs.colormap = gctx->colormap;
     
     // Create Warning window
-    Window window = XCreateWindow(
-        display, root,
-        x, y, width, height, border,
-        depth,
-        InputOutput,
-        visual,
-        CWColormap | CWOverrideRedirect | CWBackPixel,
-        &attrs
-    );
+    wctx->window = XCreateWindow(gctx->display, gctx->root, x, y, width, height, border, gctx->depth, InputOutput, gctx->visual, CWColormap | CWOverrideRedirect | CWBackPixel, &attrs);
 
-    XMapWindow(display, window);
-    XFlush(display);
+    XMapWindow(gctx->display, wctx->window);
+    XFlush(gctx->display);
 
-    Pixmap draw_buffer = XCreatePixmap(display, window, width, height, depth);
-    XftDraw *draw_context = XftDrawCreate(display, draw_buffer, visual, colormap);
-    GC graphics_context = XCreateGC(display, window, 0, NULL);
+    Pixmap draw_buffer = XCreatePixmap(gctx->display, wctx->window, width, height, gctx->depth);
+    XftDraw *draw_context = XftDrawCreate(gctx->display, draw_buffer, gctx->visual, gctx->colormap);
+    GC graphics_context = XCreateGC(gctx->display, wctx->window, 0, NULL);
 
-    wctx->window = window;
     wctx->width = width;
     wctx->height = height;
     wctx->draw_buffer = draw_buffer;
@@ -618,26 +590,44 @@ static void spawn_window(uint width, uint height, int x, int y, int border, XCol
 }
 
 
-static void draw_warning(char *warning_text, char *hint_text, uint time, WindowContext *wctx)
+static void draw_warning(GlobalContext *gctx, char *warning_text, char *hint_text, uint time, WindowContext *wctx)
 {
-    // Clear window
-
-    XSetForeground(display, wctx->graphics_context, background_color.pixel);
-    XFillRectangle(display, wctx->draw_buffer, wctx->graphics_context, 0, 0, wctx->width, wctx->height);
-
     char text[256];
     sprintf(text, warning_text, time);
 
     // Calculate text extents
 
     XGlyphInfo warning_extents;
-    XftTextExtentsUtf8(display, warning_font, (XftChar8 *)text, strlen(text), &warning_extents);
+    XftTextExtentsUtf8(gctx->display, gctx->warning_font, (XftChar8 *)text, strlen(text), &warning_extents);
     XGlyphInfo hint_extents;
-    XftTextExtentsUtf8(display, hint_font, (XftChar8 *)hint_text, strlen(hint_text), &hint_extents);
+    XftTextExtentsUtf8(gctx->display, gctx->hint_font, (XftChar8 *)hint_text, strlen(hint_text), &hint_extents);
 
-    // Draw progress
- 
-    XSetForeground(display, wctx->graphics_context, progress_color.pixel);
+    // Draw Warning Text
+
+    int warning_text_x = (wctx->width - warning_extents.width) / 2;
+    int warning_text_y = (wctx->height - warning_extents.height) / 2 + warning_extents.height - (warning_extents.height - warning_extents.y);
+    XftDrawStringUtf8(wctx->draw_context, &gctx->font_color, gctx->warning_font, warning_text_x, warning_text_y, (XftChar8 *)text, strlen(text));
+
+    int hint_text_x = (wctx->width - hint_extents.width) / 2;
+    int hint_text_y = wctx->height - hint_extents.height;
+    XftDrawStringUtf8(wctx->draw_context, &gctx->font_color, gctx->hint_font, hint_text_x, hint_text_y, (XftChar8 *)hint_text, strlen(hint_text));
+    
+    // Update display
+    XCopyArea(gctx->display, wctx->draw_buffer, wctx->window, wctx->graphics_context, 0, 0, wctx->width, wctx->height, 0, 0);
+    XFlush(gctx->display);
+}
+
+
+static void clear_window(GlobalContext *gctx, WindowContext *wctx, XColor color)
+{
+    XSetForeground(gctx->display, wctx->graphics_context, color.pixel);
+    XFillRectangle(gctx->display, wctx->draw_buffer, wctx->graphics_context, 0, 0, wctx->width, wctx->height);
+}
+
+
+static void draw_progress(GlobalContext *gctx, WindowContext *wctx, double progress)
+{
+    XSetForeground(gctx->display, wctx->graphics_context, gctx->progress_color.pixel);
 
     // int progress_max_width = 840;
     int progress_max_width = wctx->width;
@@ -648,37 +638,18 @@ static void draw_warning(char *warning_text, char *hint_text, uint time, WindowC
     // int progress_y = title_text_y + title_extents.y;
     // int progress_y = wctx->height - progress_height;
     int progress_y = 0;
-    XFillRectangle(display, wctx->draw_buffer, wctx->graphics_context, progress_x, progress_y, progress_width, progress_height);
+    XFillRectangle(gctx->display, wctx->draw_buffer, wctx->graphics_context, progress_x, progress_y, progress_width, progress_height);
 
-    // Draw Warning Text
-
-    int warning_text_x = (wctx->width - warning_extents.width) / 2;
-    int warning_text_y = (wctx->height - warning_extents.height) / 2 + warning_extents.height - (warning_extents.height - warning_extents.y);
-    XftDrawStringUtf8(wctx->draw_context, &font_color, warning_font, warning_text_x, warning_text_y, (XftChar8 *)text, strlen(text));
-
-    int hint_text_x = (wctx->width - hint_extents.width) / 2;
-    int hint_text_y = wctx->height - hint_extents.height;
-    XftDrawStringUtf8(wctx->draw_context, &font_color, hint_font, hint_text_x, hint_text_y, (XftChar8 *)hint_text, strlen(hint_text));
-    
-    // Update display
-    XCopyArea(display, wctx->draw_buffer, wctx->window, wctx->graphics_context, 0, 0, wctx->width, wctx->height, 0, 0);
-    XFlush(display);
 }
 
-
-static void draw_message(char *title_text, char *message_text, WindowContext *wctx)
+static void draw_message(GlobalContext *gctx, char *title_text, char *message_text, WindowContext *wctx)
 {
-    // Clear window
-    //
-    XSetForeground(display, wctx->graphics_context, background_color.pixel);
-    XFillRectangle(display, wctx->draw_buffer, wctx->graphics_context, 0, 0, wctx->width, wctx->height);
-
     // Calculate text extents
 
     XGlyphInfo title_extents;
-    XftTextExtentsUtf8(display, title_font, (XftChar8 *)title_text, strlen(title_text), &title_extents);
+    XftTextExtentsUtf8(gctx->display, gctx->title_font, (XftChar8 *)title_text, strlen(title_text), &title_extents);
     XGlyphInfo message_extents;
-    XftTextExtentsUtf8(display, message_font, (XftChar8 *)message_text, strlen(message_text), &message_extents);
+    XftTextExtentsUtf8(gctx->display, gctx->message_font, (XftChar8 *)message_text, strlen(message_text), &message_extents);
 
     // Count Message lines and calculate multiline heigth
 
@@ -691,30 +662,15 @@ static void draw_message(char *title_text, char *message_text, WindowContext *wc
         c++; // Move past the found newline
     }
 
-    int pixel_margin = pt_to_px(config.margin, dpi);
+    int pixel_margin = pt_to_px(gctx->config.margin, gctx->dpi);
     int message_heigth = message_lines_count * message_extents.height + (message_lines_count - 1) * message_extents.height;
-
-    // Draw Progress
-    
-    XSetForeground(display, wctx->graphics_context, progress_color.pixel);
-
-    // int progress_max_width = 840;
-    int progress_max_width = wctx->width;
-    int progress_width = progress_max_width * progress;
-    // int progress_height = pt_to_px(config.progress_weight, dpi);
-    int progress_height = wctx->height;
-    int progress_x = (wctx->width - progress_max_width) / 2;
-    // int progress_y = title_text_y + title_extents.y;
-    // int progress_y = wctx->height - progress_height;
-    int progress_y = 0;
-    XFillRectangle(display, wctx->draw_buffer, wctx->graphics_context, progress_x, progress_y, progress_width, progress_height);
 
     // Draw Title
 
     int title_text_x = (wctx->width - title_extents.width) / 2;
     int title_text_y = (wctx->height - title_extents.height - message_heigth - pixel_margin) / 2 + title_extents.height - title_extents.y;
 
-    XftDrawStringUtf8(wctx->draw_context, &font_color, title_font, title_text_x, title_text_y, (XftChar8 *)title_text, strlen(title_text));
+    XftDrawStringUtf8(wctx->draw_context, &gctx->font_color, gctx->title_font, title_text_x, title_text_y, (XftChar8 *)title_text, strlen(title_text));
 
     // Draw Message line by line
 
@@ -722,19 +678,19 @@ static void draw_message(char *title_text, char *message_text, WindowContext *wc
     for (int i = 0; message_line; i++)
     {
         XGlyphInfo message_line_extents;
-        XftTextExtentsUtf8(display, message_font, (XftChar8 *)message_line, strlen(message_line), &message_line_extents);
+        XftTextExtentsUtf8(gctx->display, gctx->message_font, (XftChar8 *)message_line, strlen(message_line), &message_line_extents);
 
         int message_line_x = (wctx->width - message_line_extents.width) / 2;
         int message_start_y = (wctx->height - title_extents.height - message_heigth - pixel_margin) / 2 + title_extents.height + pixel_margin;
         int message_line_y = message_start_y + message_extents.height + message_extents.height * i * 1.5 - message_extents.y;
 
-        XftDrawStringUtf8(wctx->draw_context, &font_color, message_font, message_line_x, message_line_y, (XftChar8 *)message_line, strlen(message_line));
+        XftDrawStringUtf8(wctx->draw_context, &gctx->font_color, gctx->message_font, message_line_x, message_line_y, (XftChar8 *)message_line, strlen(message_line));
         message_line = strtok(NULL, "\n");
     }
 
     // Update display
-    XCopyArea(display, wctx->draw_buffer, wctx->window, wctx->graphics_context, 0, 0, wctx->width, wctx->height, 0, 0);
-    XFlush(display);
+    XCopyArea(gctx->display, wctx->draw_buffer, wctx->window, wctx->graphics_context, 0, 0, wctx->width, wctx->height, 0, 0);
+    XFlush(gctx->display);
 }
 
 int event_wait(Display *display, XEvent *event, double timeout_sec)
@@ -779,212 +735,305 @@ int event_wait(Display *display, XEvent *event, double timeout_sec)
     }
 }
 
-int main(int argc, char **argv) 
+
+static void print_usage(const char *prog)
 {
-    load_defaults(&config);
-    load_config(&config);
+    printf(
+        "Usage: %s [options]\n"
+        "\nOptions:\n"
+        "  -d, --debug        Enable debug mode\n"
+        "  -h, --help         Show this help and exit\n",
+        prog
+    );
+}
 
-    Timer timer;
-    double frame_time = 1.0d / (double)config.fps;
 
+static void parse_args(int argc, char **argv, GlobalContext *gctx)
+{
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-d") == 0) {
-            debug = true;
-            load_dev(&config);
+
+        if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--debug") == 0)
+        {
+            gctx->debug = true;
+            load_dev(&gctx->config);
             printf("Debug mode enabled!\n");
+            continue;
+        }
+
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
+        {
+            print_usage(argv[0]);
+            exit(0);
+        }
+
+        fprintf(stderr, "Unknown option: %s\n", argv[i]);
+        print_usage(argv[0]);
+        exit(1);
+    }
+}
+
+
+static GlobalState process_wait(GlobalContext *gctx)
+{
+        sleep(gctx->config.timer_duration);
+        
+        if (gctx->config.warning)
+            return STATE_WARNING;
+
+        return STATE_BREAK;
+}
+
+
+static GlobalState process_warning(GlobalContext *gctx)
+{
+    uint warning_width = pt_to_px(gctx->config.warning_width, gctx->dpi);
+    uint warning_height = pt_to_px(gctx->config.warning_height, gctx->dpi);
+
+    int warning_x = (gctx->screen_width  - warning_width) / 2;
+    int warning_y = (gctx->screen_height - warning_height) / 2;
+
+    spawn_window(gctx, warning_width, warning_height, warning_x, warning_y, gctx->config.border_width, &gctx->background_color, true);
+
+    // Manage window focus
+    XRaiseWindow(gctx->display, gctx->wctx.window);
+    XSetInputFocus(gctx->display, gctx->wctx.window, RevertToNone, CurrentTime);      
+    XSetWindowBorder(gctx->display, gctx->wctx.window, gctx->border_color.pixel);
+    XFlush(gctx->display);  
+
+    // Listen for keypresses
+    // XGrabKeyboard(gctx->display, gctx->wctx.window, True, GrabModeAsync, GrabModeAsync, CurrentTime);
+    XSelectInput(gctx->display, gctx->wctx.window, KeyPressMask | ButtonPressMask | ExposureMask);
+
+    XEvent event;
+    double warning_duration = gctx->config.warning_duration;
+
+    double progress = 0;
+    Timer timer = {0};
+    timer_start(&timer);
+
+    double elapsed = timer_elapsed(&timer);
+    double time_left = warning_duration;
+    double next_frame = elapsed;
+    double wait_time = 0.0d;
+
+    while (elapsed < warning_duration) 
+    {
+        elapsed = timer_elapsed(&timer);
+        time_left = warning_duration - elapsed;
+        double wait_time = next_frame - elapsed;
+
+        if (wait_time < 0) wait_time = 0.0d;
+        
+        switch (event_wait(gctx->display, &event, wait_time))
+        {
+            case -1:
+                die("Failed input!\n");
+            case 0:
+                progress = time_left / warning_duration;
+                clear_window(gctx, &gctx->wctx, gctx->background_color);
+                draw_progress(gctx, &gctx->wctx, progress);
+                draw_warning(gctx, gctx->config.warning, gctx->config.warning_hint, (int)time_left, &gctx->wctx);
+                next_frame += gctx->frame_time;
+                continue;
+        }
+
+        switch (event.type)
+        {
+            case ButtonPress:
+            {
+                XSetInputFocus(gctx->display, gctx->wctx.window, RevertToPointerRoot, CurrentTime);
+                break;
+            }
+            case KeyPress:
+            {
+                KeySym key = XLookupKeysym(&event.xkey, 0);
+                switch (key)
+                {
+                    case XK_space: 
+                    {
+                        printf("Breaking...\n");
+                        XDestroyWindow(gctx->display, gctx->wctx.window);
+                        return STATE_BREAK;
+                    }
+                    case XK_w: // Snooze
+                    {
+                        printf("Snoozing...\n");
+                        // XUngrabKeyboard(gctx->display, CurrentTime);
+                        // XUngrabPointer(gctx->display, CurrentTime);
+                        XDestroyWindow(gctx->display, gctx->wctx.window);
+                        XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+                        XFlush(gctx->display);
+                        sleep(gctx->config.snooze_duration);
+                        return STATE_WARNING;
+                    }
+                    case XK_s: // Skip
+                    {
+                        printf("Skipping...\n");
+                        XDestroyWindow(gctx->display, gctx->wctx.window);
+                        XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+                        XFlush(gctx->display);
+                        return STATE_WAIT;
+                    }
+                    case XK_q: // Quit
+                    {
+                        printf("Quitting...\n");
+                        XUngrabKeyboard(gctx->display, CurrentTime);
+                        XUngrabPointer(gctx->display, CurrentTime);
+                        XDestroyWindow(gctx->display, gctx->wctx.window);
+                        XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+                        XCloseDisplay(gctx->display);
+                        return STATE_EXIT;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    printf("Breaking...\n");
+    XDestroyWindow(gctx->display, gctx->wctx.window);
+    return STATE_BREAK;
+}
+
+
+static GlobalState process_break(GlobalContext *gctx)
+{
+    spawn_window(gctx, gctx->screen_width, gctx->screen_height, 0, 0, 0, &gctx->background_color, true);
+    XFlush(gctx->display);
+
+    // Try to grab pointer and keyboard
+    XGrabPointer(gctx->display, gctx->wctx.window, True,
+                ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+                GrabModeAsync, GrabModeAsync,
+                None, None, CurrentTime);
+
+    XGrabKeyboard(gctx->display, gctx->wctx.window,
+                True,
+                GrabModeAsync, GrabModeAsync,
+                CurrentTime);
+    
+    double progress = 0;
+
+    // Draw break message
+    clear_window(gctx, &gctx->wctx, gctx->background_color);
+    draw_progress(gctx, &gctx->wctx, progress);
+    draw_message(gctx, gctx->config.title, gctx->config.message, &gctx->wctx);
+
+    // Play sound
+    play_wav_async(gctx->config.start_sound_path, gctx->config.volume);
+
+    // Process break
+    double duration = gctx->config.break_duration;
+    struct timespec start, now, delta;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    while (true)
+    {
+        clock_gettime(CLOCK_MONOTONIC, &now);
+
+        double elapsed = (now.tv_sec - start.tv_sec) + (now.tv_nsec - start.tv_nsec) * 1e-9;
+
+        progress = elapsed / (double)gctx->config.break_duration;
+        clear_window(gctx, &gctx->wctx, gctx->background_color);
+        draw_progress(gctx, &gctx->wctx, progress);
+        draw_message(gctx, gctx->config.title, gctx->config.message, &gctx->wctx);
+
+        if (elapsed >= gctx->config.break_duration)
+            break;
+
+        // Hold for a frame
+        delta.tv_sec = (time_t)gctx->frame_time;
+        delta.tv_nsec = (gctx->frame_time - (time_t)gctx->frame_time) * 1e9;
+        nanosleep(&delta, NULL);
+    }
+}
+
+
+static GlobalState process_end(GlobalContext *gctx)
+{
+    // Draw end message
+    clear_window(gctx, &gctx->wctx, gctx->background_color);
+    draw_progress(gctx, &gctx->wctx, 1.0);
+    draw_message(gctx, gctx->config.end_title, gctx->config.end_message, &gctx->wctx);
+
+    // Play sound
+    play_wav_async(gctx->config.end_sound_path, gctx->config.volume);
+
+    // Listen for keypresses
+    XSelectInput(gctx->display, gctx->wctx.window, KeyPressMask | ExposureMask);
+
+    XEvent event;
+
+    while (true) 
+    {
+        XNextEvent(gctx->display, &event);
+        if (event.type == KeyPress) 
+        {
+            KeySym key = XLookupKeysym(&event.xkey, 0);
+            break;
         }
     }
 
-    do {
-        sleep(config.timer_duration);
+    if(gctx->config.repeat)
+    {
+        XUngrabKeyboard(gctx->display, CurrentTime);
+        XUngrabPointer(gctx->display, CurrentTime);
+        XDestroyWindow(gctx->display, gctx->wctx.window);
 
-        warn:
+        XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+        XFlush(gctx->display);
+        return STATE_WAIT;
+    }
 
-        init();
+    return STATE_EXIT;
+}
 
-        // Spawn Warning
-        WindowContext warning_wctx;
 
-        uint warning_width = pt_to_px(config.warning_width, dpi);
-        uint warning_height = pt_to_px(config.warning_height, dpi);
+static GlobalState process_exit(GlobalContext *gctx)
+{
+        printf("Exiting...\n");
+        XUngrabKeyboard(gctx->display, CurrentTime);
+        XUngrabPointer(gctx->display, CurrentTime);
+        XDestroyWindow(gctx->display, gctx->wctx.window);
 
-        int warning_x = (screen_width  - warning_width) / 2;
-        int warning_y = (screen_height - warning_height) / 2;
+        XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+        XCloseDisplay(gctx->display);
 
-        spawn_window(warning_width, warning_height, warning_x, warning_y, config.border_width, &background_color, true, &warning_wctx);
+        return STATE_EXIT;
+}
 
-        // Manage window focus
-        XRaiseWindow(display, warning_wctx.window);
-        XSetInputFocus(display, warning_wctx.window, RevertToNone, CurrentTime);      
-        XSetWindowBorder(display, warning_wctx.window, border_color.pixel);
-        XFlush(display);  
 
-        // XGrabKeyboard(display, warning_wctx.window,
-        //             True,
-        //             GrabModeAsync, GrabModeAsync,
-        //             CurrentTime);
+int main(int argc, char **argv) 
+{
+    GlobalContext gctx = {0};
 
-        // Listen for keypresses
-        XSelectInput(display, warning_wctx.window, KeyPressMask | ButtonPressMask | ExposureMask);
+    load_defaults(&gctx.config);
+    load_config(&gctx.config);
+    parse_args(argc, argv, &gctx);
 
-        XEvent event;
-        double warning_duration = config.warning_duration;
+    init(&gctx);
 
-        timer_start(&timer);
-        double elapsed = timer_elapsed(&timer);
-        double time_left = warning_duration;
-        double next_frame = elapsed;
-        double wait_time = 0.0d;
+    GlobalState state = STATE_WAIT;
 
-        while (elapsed < warning_duration) 
+    while (state != STATE_EXIT)
+    {
+        switch (state)
         {
-            elapsed = timer_elapsed(&timer);
-            time_left = warning_duration - elapsed;
-            wait_time = next_frame - elapsed;
-
-            if (wait_time < 0) wait_time = 0.0d;
-            
-            switch (event_wait(display, &event, wait_time))
-            {
-                case -1:
-                    exit(1);
-                case 0:
-                    progress = time_left / warning_duration;
-                    draw_warning(config.warning, config.warning_hint, (int)time_left, &warning_wctx);
-                    next_frame += frame_time;
-                    continue;
-            }
-
-            switch (event.type)
-            {
-                case ButtonPress:
-                {
-                    XSetInputFocus(display, warning_wctx.window, RevertToPointerRoot, CurrentTime);
-                    break;
-                }
-                case KeyPress:
-                {
-                    KeySym key = XLookupKeysym(&event.xkey, 0);
-                    switch (key)
-                    {
-                        case XK_space: 
-                        {
-                            printf("Breaking...\n");
-                            goto start_break;
-                            break;
-                        }
-                        case XK_w: // Snooze
-                        {
-                            printf("Snoozing...\n");
-                            // XUngrabKeyboard(display, CurrentTime);
-                            // XUngrabPointer(display, CurrentTime);
-                            XDestroyWindow(display, warning_wctx.window);
-                            XSetInputFocus(display, last_focus, RevertToNone, CurrentTime);
-                            XFlush(display);
-
-                            sleep(config.snooze_duration);
-                            goto warn;
-                            break;
-                        }
-                        case XK_s: // Skip
-                        {
-                            printf("Skipping...\n");
-                            goto skip_break;
-                            break;
-                        }
-                        case XK_q: // Quit
-                        {
-                            printf("Quitting...\n");
-                            XUngrabKeyboard(display, CurrentTime);
-                            XUngrabPointer(display, CurrentTime);
-                            XDestroyWindow(display, warning_wctx.window);
-                            XSetInputFocus(display, last_focus, RevertToNone, CurrentTime);
-                            XCloseDisplay(display);
-                            return 0;
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-        start_break:
-        
-        progress = 0.0;
-
-        // Spawn Break window
-        WindowContext break_wctx;
-        spawn_window(screen_width, screen_height, 0, 0, 0, &background_color, true, &break_wctx);
-
-        XDestroyWindow(display, warning_wctx.window);
-        XFlush(display);
-
-        // Try to grab pointer and keyboard
-        XGrabPointer(display, break_wctx.window, True,
-                    ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-                    GrabModeAsync, GrabModeAsync,
-                    None, None, CurrentTime);
-
-        XGrabKeyboard(display, break_wctx.window,
-                    True,
-                    GrabModeAsync, GrabModeAsync,
-                    CurrentTime);
-        
-        // Draw break message
-        draw_message(config.title, config.message, &break_wctx);
-
-        // Play sound
-        play_wav_async(config.start_sound_path, config.volume);
-
-        // Process break
-        double duration = config.break_duration;
-        struct timespec start, now, delta;
-        clock_gettime(CLOCK_MONOTONIC, &start);
-
-        while (true)
-        {
-            clock_gettime(CLOCK_MONOTONIC, &now);
-
-            double elapsed = (now.tv_sec - start.tv_sec) + (now.tv_nsec - start.tv_nsec) * 1e-9;
-
-            progress = elapsed / (double)config.break_duration;
-            draw_message(config.title, config.message, &break_wctx);
-
-            if (elapsed >= config.break_duration)
+            case STATE_WAIT: 
+                state = process_wait(&gctx);
                 break;
-
-            // Hold for a frame
-            delta.tv_sec = (time_t)frame_time;
-            delta.tv_nsec = (frame_time - (time_t)frame_time) * 1e9;
-            nanosleep(&delta, NULL);
-        }
-
-        // Draw end message
-        draw_message(config.end_title, config.end_message, &break_wctx);
-
-        // Play sound
-        play_wav_async(config.end_sound_path, config.volume);
-
-        // Listen for keypresses
-        XSelectInput(display, break_wctx.window, KeyPressMask | ExposureMask);
-
-        while (true) 
-        {
-            XNextEvent(display, &event);
-            if (event.type == KeyPress) 
-            {
-                KeySym key = XLookupKeysym(&event.xkey, 0);
+            case STATE_WARNING:
+                state = process_warning(&gctx);
                 break;
-            }
+            case STATE_BREAK:
+                state = process_break(&gctx);
+                break;
+            case STATE_END:
+                state = process_end(&gctx);
+                break;
+            default:
+                state = process_exit(&gctx);
+                break;
         }
-
-        XUngrabKeyboard(display, CurrentTime);
-        XUngrabPointer(display, CurrentTime);
-        XDestroyWindow(display, break_wctx.window);
-        skip_break:
-        XSetInputFocus(display, last_focus, RevertToNone, CurrentTime);
-        XCloseDisplay(display);
-
-    } while (config.repeat);
-
+    }
     return 0;
 }

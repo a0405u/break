@@ -51,6 +51,51 @@ typedef struct wctx
 } WindowContext;
 
 
+typedef struct gctx
+{
+    Config config;
+    bool debug;
+    WindowContext wctx;
+
+    Display *display;
+    int screen;
+    double dpi;
+    int depth;
+    Window root;
+    XVisualInfo vinfo;
+    Visual *visual;
+    Colormap colormap;
+
+    uint screen_width;
+    uint screen_height;
+
+    XftFont *title_font;
+    XftFont *message_font;
+    XftFont *warning_font;
+    XftFont *hint_font;
+
+    XftColor font_color;
+    XColor background_color;
+    XColor border_color;
+    XColor progress_color;
+
+    Window last_focus;
+    int revert_to;
+
+    double frame_time;
+    double progress;
+} GlobalContext;
+
+
+typedef enum {
+    STATE_WAIT,
+    STATE_WARNING,
+    STATE_BREAK,
+    STATE_END,
+    STATE_EXIT
+} GlobalState;
+
+
 #pragma pack(push, 1)
 typedef struct 
 {

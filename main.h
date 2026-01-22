@@ -7,12 +7,14 @@ typedef struct cfg
     char warning_hint_text[256]; // Warning Hint
     char end_title_text[128]; // End Screen Title
     char end_message_text[256]; // End Screen Message
+    char end_hint_text[256]; // End Screen Message
 
     bool warning_enabled;
     bool skip_enabled;
     bool snooze_enabled;
     bool stop_enabled;
     bool end_enabled;
+    bool hints_enabled;
 
     time_t timer_duration; // Time before/between Breaks
     time_t break_duration; // Duration of Breaks
@@ -71,7 +73,8 @@ typedef struct gctx
 {
     Config config;
     bool debug;
-    WindowContext wctx;
+    WindowContext break_wctx;
+    WindowContext warning_wctx;
 
     Display *display;
     int screen;

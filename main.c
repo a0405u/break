@@ -126,11 +126,11 @@ static void get_config_path(char *buffer, size_t length)
     const char *home = getenv("HOME");
 
     if (xdg)
-        snprintf(buffer, length, "%s/break/config", xdg);
+        snprintf(buffer, length, "%s/break/config.ini", xdg);
     else if (home)
-        snprintf(buffer, length, "%s/.config/break/config", home);
+        snprintf(buffer, length, "%s/.config/break/config.ini", home);
     else
-        snprintf(buffer, length, "config");
+        snprintf(buffer, length, "config.ini");
 }
 
 
@@ -193,33 +193,22 @@ static void parse_string(char *dst, size_t dst_size, const char *src)
     while (isspace((unsigned char)*src))
         src++;
 
-    // Must start with a quote
-    if (*src != '"') {
-        dst[0] = '\0';
-        return;
-    }
-    src++; // skip opening quote
-
     size_t i = 0;
-    while (*src && *src != '"' && i + 1 < dst_size) {
-        dst[i++] = *src++;
-    }
-    dst[i] = '\0';
-}
 
-
-static void strip_comments(char *line)
-{
-    int in_quotes = 0;
-
-    for (char *p = line; *p; p++) {
-        if (*p == '"')
-            in_quotes = !in_quotes;
-        else if (*p == '#' && !in_quotes) {
-            *p = '\0';
-            break;
+    if (*src == '"') {
+        // Quoted string
+        src++; // skip opening quote
+        while (*src && *src != '"' && i + 1 < dst_size) {
+            dst[i++] = *src++;
+        }
+    } else {
+        // Single-word string
+        while (*src && !isspace((unsigned char)*src) && i + 1 < dst_size) {
+            dst[i++] = *src++;
         }
     }
+
+    dst[i] = '\0';
 }
 
 
@@ -235,9 +224,6 @@ static void load_config(Config *config)
     char line[512];
     while (fgets(line, sizeof(line), f)) 
     {
-        strip_comments(line);
-        trim(line);
-
         if (line[0] == '#' || line[0] == '\n' || line[0] == '\0')
             continue;
 
@@ -251,15 +237,15 @@ static void load_config(Config *config)
 
         #define SET_INT(field) \
             if (strcmp(key, #field) == 0) \
-                config->field = atoi(value)
+                config->field = atoi(value);
         
         #define SET_FLOAT(field) \
             if (strcmp(key, #field) == 0) \
-                config->field = atof(value)
+                config->field = atof(value);
 
         #define SET_STRING(field) \
             if (strcmp(key, #field) == 0) \
-                parse_string(config->field, sizeof(config->field), value)
+                parse_string(config->field, sizeof(config->field), value);
         
         #define SET_BOOL(field) \
             if (strcmp(key, #field) == 0) \

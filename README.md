@@ -2,6 +2,8 @@
 
 Simple break timer for XServer that reminds you to rest.
 
+![screenshot](https://0x405.ru/break/screenshot_a.png) ![screenshot](https://0x405.ru/break/screenshot_b.png)
+
 Use the following command to build:
 
 ```sh

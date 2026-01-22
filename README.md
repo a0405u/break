@@ -4,24 +4,24 @@ Simple break timer for XServer that reminds you to rest.
 
 Use the following command to build:
 
-```
+```sh
 gcc main.c timer.c -o break -lX11 -lXft -I/usr/include/freetype2 -lm -lao
 ```
 
 Put your config in `$XDG_CONFIG_HOME/break/config`
 Example and defaults:
 
-```
-break_title_text = Break time!
-break_message_text = Rest your eyes. Stretch your legs. Breathe. Relax.
-break_hint_text = s - stop, q - quit
+```ini
+break_title_text = "Break time!"
+break_message_text = "Rest your eyes. Stretch your legs. Breathe. Relax."
+break_hint_text = "s - stop, q - quit"
 
-warning_message_text = Please, take a break!
-warning_hint_text = space - start, w - snooze, s - skip, q - quit
+warning_message_text = "Please, take a break!"
+warning_hint_text = "space - start, w - snooze, s - skip, q - quit"
 
-end_title_text = Break has ended!
-end_message_text = Work fruitfully. Concentrate on important. Don't get distracted.
-end_hint_text = press any key to continue...
+end_title_text = "Break has ended!"
+end_message_text = "Work fruitfully. Concentrate on important. Don't get distracted."
+end_hint_text = "press any key to continue..."
 
 warning_enabled = true # Enable warning before break
 skip_enabled = true # Allow break skip

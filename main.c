@@ -187,6 +187,42 @@ unsigned int parse_color(const char *str)
 }
 
 
+static void parse_string(char *dst, size_t dst_size, const char *src)
+{
+    // Skip leading whitespace
+    while (isspace((unsigned char)*src))
+        src++;
+
+    // Must start with a quote
+    if (*src != '"') {
+        dst[0] = '\0';
+        return;
+    }
+    src++; // skip opening quote
+
+    size_t i = 0;
+    while (*src && *src != '"' && i + 1 < dst_size) {
+        dst[i++] = *src++;
+    }
+    dst[i] = '\0';
+}
+
+
+static void strip_comments(char *line)
+{
+    int in_quotes = 0;
+
+    for (char *p = line; *p; p++) {
+        if (*p == '"')
+            in_quotes = !in_quotes;
+        else if (*p == '#' && !in_quotes) {
+            *p = '\0';
+            break;
+        }
+    }
+}
+
+
 static void load_config(Config *config)
 {
     char path[512];
@@ -199,6 +235,9 @@ static void load_config(Config *config)
     char line[512];
     while (fgets(line, sizeof(line), f)) 
     {
+        strip_comments(line);
+        trim(line);
+
         if (line[0] == '#' || line[0] == '\n' || line[0] == '\0')
             continue;
 
@@ -220,10 +259,7 @@ static void load_config(Config *config)
 
         #define SET_STRING(field) \
             if (strcmp(key, #field) == 0) \
-            { \
-                strncpy(config->field, value, sizeof(config->field) - 1); \
-                config->field[sizeof(config->field) - 1] = '\0'; \
-            }
+                parse_string(config->field, sizeof(config->field), value)
         
         #define SET_BOOL(field) \
             if (strcmp(key, #field) == 0) \

@@ -20,8 +20,8 @@
 
 /*
     Release:
-    - Config: Edit example config
-    - README
+    - README: Edit example config
+    - README: Custom license
 
     To Do:
     - Config: Separate font for time
@@ -45,8 +45,10 @@ static void load_defaults(Config *config)
     strcpy(config->break_title_text, "Break time!");
     strcpy(config->break_message_text, "Rest your eyes. Stretch your legs. Breathe. Relax.");
     strcpy(config->break_hint_text, "s - stop, q - quit");
+
     strcpy(config->warning_message_text, "Please, take a break!");
     strcpy(config->warning_hint_text, "space - start, w - snooze, s - skip, q - quit");
+
     strcpy(config->end_title_text, "Break has ended!");
     strcpy(config->end_message_text, "Work fruitfully. Concentrate on important. Don't get distracted.");
     strcpy(config->end_hint_text, "press any key to continue...");
@@ -57,23 +59,22 @@ static void load_defaults(Config *config)
     config->stop_enabled = true;
     config->end_enabled = true;
     config->hints_enabled = true;
+    config->time_enabled = true;
 
     config->timer_duration = 28 * 60;
     config->break_duration = 5 * 60;
     config->warning_duration = 60;
     config->snooze_duration = 60;
+
     config->repeat = true;
 
     strcpy(config->font_color, "#ffffff");
+    strcpy(config->hint_font_color, "#aaaaaa");
     strcpy(config->background_font_color, "#222222");
     strcpy(config->background_color, "#000000");
     strcpy(config->progress_color, "#161616");
     strcpy(config->border_color, "#333333");
 
-    config->warning_width = 320; // pt
-    config->warning_height = 96; // pt
-    config->border_width = 0; // px
-    config->margin = 12;
     strcpy(config->font_name, "monospace");
 
     config->title_font_size = 14;
@@ -91,12 +92,17 @@ static void load_defaults(Config *config)
     config->hint_font_slant = 100;
     strcpy(config->hint_font_style, "regular");
 
-    config->time_font_size = 333;
+    config->time_font_size = 128;
     config->time_font_weight = 300;
     config->time_font_slant = 0;
     strcpy(config->time_font_style, "regular");
 
-    config->progress_weight = 920;
+    config->warning_width = 320; // pt
+    config->warning_height = 96; // pt
+    config->border_width = 0; // px
+    config->progress_weight = 16;
+    config->margin = 12;
+
     config->fps = 60;
 
     strcpy(config->start_sound_path, "start.wav");
@@ -108,8 +114,8 @@ static void load_defaults(Config *config)
 static void load_dev(Config *config)
 {
     config->timer_duration = 1;
-    config->break_duration = 3;
-    config->warning_duration = 3;
+    // config->break_duration = 3;
+    // config->warning_duration = 3;
     config->snooze_duration = 3;
 }
 
@@ -234,46 +240,65 @@ static void load_config(Config *config)
         SET_STRING(break_title_text);
         SET_STRING(break_message_text);
         SET_STRING(break_hint_text);
+
         SET_STRING(warning_message_text);
         SET_STRING(warning_hint_text);
+
         SET_STRING(end_title_text);
         SET_STRING(end_message_text);
+        SET_STRING(end_hint_text);
+
+        SET_BOOL(warning_enabled);
+        SET_BOOL(skip_enabled);
+        SET_BOOL(snooze_enabled);
+        SET_BOOL(stop_enabled);
+        SET_BOOL(end_enabled);
+        SET_BOOL(hints_enabled);
+        SET_BOOL(time_enabled);
 
         SET_DURATION(timer_duration);
         SET_DURATION(break_duration);
         SET_DURATION(warning_duration);
         SET_DURATION(snooze_duration);
+
         SET_BOOL(repeat);
 
         SET_STRING(font_color);
+        SET_STRING(hint_font_color);
         SET_STRING(background_font_color);
         SET_STRING(background_color);
-        SET_INT(border_width);
+        SET_STRING(progress_color);
         SET_STRING(border_color);
-        SET_INT(warning_width);
-        SET_INT(warning_height);
-        SET_INT(margin);
+
         SET_STRING(font_name);
 
         SET_INT(title_font_size);
-        SET_INT(title_font_slant);
         SET_INT(title_font_weight);
+        SET_INT(title_font_slant);
         SET_STRING(title_font_style);
 
         SET_INT(message_font_size);
-        SET_INT(message_font_slant);
         SET_INT(message_font_weight);
+        SET_INT(message_font_slant);
         SET_STRING(message_font_style);
 
         SET_INT(hint_font_size);
-        SET_INT(hint_font_slant);
         SET_INT(hint_font_weight);
+        SET_INT(hint_font_slant);
         SET_STRING(hint_font_style);
 
         SET_INT(time_font_size);
-        SET_INT(time_font_slant);
         SET_INT(time_font_weight);
+        SET_INT(time_font_slant);
         SET_STRING(time_font_style);
+
+        SET_INT(warning_width);
+        SET_INT(warning_height);
+        SET_INT(border_width);
+        SET_INT(progress_weight);
+        SET_INT(margin);
+
+        SET_INT(fps);
 
         SET_STRING(start_sound_path);
         SET_STRING(end_sound_path);
@@ -566,6 +591,7 @@ static void init(GlobalContext *gctx)
 
     /* --- COLORS --- */
     load_xft_color(gctx, gctx->config.font_color, &gctx->font_color);
+    load_xft_color(gctx, gctx->config.hint_font_color, &gctx->hint_font_color);
     load_xft_color(gctx, gctx->config.background_font_color, &gctx->background_font_color);
     load_color(gctx, gctx->config.background_color, &gctx->background_color);
     load_color(gctx, gctx->config.border_color, &gctx->border_color);
@@ -658,7 +684,7 @@ static void draw_warning(GlobalContext *gctx, char *warning_text, char *hint_tex
 
         int hint_text_x = (wctx->width - hint_extents.width) / 2;
         int hint_text_y = wctx->height - hint_extents.height;
-        XftDrawStringUtf8(wctx->draw_context, &gctx->font_color, gctx->hint_font, hint_text_x, hint_text_y, (XftChar8 *)hint_text, strlen(hint_text));
+        XftDrawStringUtf8(wctx->draw_context, &gctx->hint_font_color, gctx->hint_font, hint_text_x, hint_text_y, (XftChar8 *)hint_text, strlen(hint_text));
     }
     
     // Update display
@@ -712,25 +738,18 @@ static void draw_message(GlobalContext *gctx, char *title_text, char *message_te
 {
     // Draw time left
     
-    char time_text[256];
-    format_time(time, time_text, 256);
+    if (gctx->config.time_enabled)
+    {
+        char time_text[256];
+        format_time(time, time_text, 256);
 
-    XGlyphInfo time_extents;
-    XftTextExtentsUtf8(gctx->display, gctx->time_font, (XftChar8 *)time_text, strlen(time_text), &time_extents);
+        XGlyphInfo time_extents;
+        XftTextExtentsUtf8(gctx->display, gctx->time_font, (XftChar8 *)time_text, strlen(time_text), &time_extents);
 
-    // double char_width = gctx->time_font->max_advance_width;
-    // double char_width = pt_to_px(gctx->config.time_font_size, gctx->dpi);
-    // XGlyphInfo char_extents;
-    // XftTextExtentsUtf8(gctx->display, gctx->time_font, (FcChar8 *)"M", 1, &time_extents);
-    // double char_width = char_extents.xOff;
-
-    // printf("%d\n",  * strlen(time_text));
-    // printf("%d\n",  * strlen(time_text));
-    // int time_text_x = (wctx->width - gctx->time_font->max_advance_width * strlen(time_text)) / 2;
-    // int time_text_x = (wctx->width - pt_to_px(gctx->config.time_font_size, gctx->dpi) * strlen(time_text)) / 2;
-    int time_text_x = (wctx->width - time_extents.xOff) / 2;
-    int time_text_y = (wctx->height - time_extents.yOff + time_extents.y) / 2;
-    XftDrawStringUtf8(wctx->draw_context, &gctx->background_font_color, gctx->time_font, time_text_x, time_text_y, (XftChar8 *)time_text, strlen(time_text));
+        int time_text_x = (wctx->width - time_extents.xOff) / 2;
+        int time_text_y = (wctx->height - time_extents.yOff) / 3;
+        XftDrawStringUtf8(wctx->draw_context, &gctx->background_font_color, gctx->time_font, time_text_x, time_text_y, (XftChar8 *)time_text, strlen(time_text));
+    }
 
     // Calculate text extents
 
@@ -785,7 +804,7 @@ static void draw_message(GlobalContext *gctx, char *title_text, char *message_te
 
         int hint_text_x = (wctx->width - hint_extents.width) / 2;
         int hint_text_y = wctx->height - hint_extents.height;
-        XftDrawStringUtf8(wctx->draw_context, &gctx->font_color, gctx->hint_font, hint_text_x, hint_text_y, (XftChar8 *)hint_text, strlen(hint_text));
+        XftDrawStringUtf8(wctx->draw_context, &gctx->hint_font_color, gctx->hint_font, hint_text_x, hint_text_y, (XftChar8 *)hint_text, strlen(hint_text));
     }
     
     // Update display

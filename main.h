@@ -3,8 +3,10 @@ typedef struct cfg
     char break_title_text[128]; // Break Message Title
     char break_message_text[256]; // Break Message
     char break_hint_text[256]; // Break Hint
+                               //
     char warning_message_text[256]; // Warning Message
     char warning_hint_text[256]; // Warning Hint
+                                 //
     char end_title_text[128]; // End Screen Title
     char end_message_text[256]; // End Screen Message
     char end_hint_text[256]; // End Screen Message
@@ -15,16 +17,21 @@ typedef struct cfg
     bool stop_enabled;
     bool end_enabled;
     bool hints_enabled;
+    bool time_enabled;
 
     time_t timer_duration; // Time before/between Breaks
     time_t break_duration; // Duration of Breaks
     time_t warning_duration; // Duration of Warning Screen if enabled
     time_t snooze_duration; // Duration between Warnings
 
+    bool repeat;
+
     char font_color[16]; // Main foreground color
-    char background_font_color[16]; // Time font
+    char hint_font_color[16]; // Hint font color
+    char background_font_color[16]; // Time font color
     char background_color[16]; // Backgroung color
     char progress_color[16];
+    char border_color[16];
 
     char font_name[128]; // Main font name
 
@@ -48,19 +55,17 @@ typedef struct cfg
     int time_font_weight;
     char time_font_style[64];
 
-    int margin;
-    bool repeat;
+    uint warning_width;
+    uint warning_height;
+    uint border_width;
     int progress_weight;
+    int margin;
+
     int fps;
 
     char start_sound_path[512];
     char end_sound_path[512];
     float volume;
-
-    uint warning_width;
-    uint warning_height;
-    uint border_width;
-    char border_color[16];
 } Config;
 
 
@@ -101,6 +106,7 @@ typedef struct gctx
 
     XftColor font_color;
     XColor background_color;
+    XftColor hint_font_color;
     XftColor background_font_color;
     XColor border_color;
     XColor progress_color;

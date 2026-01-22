@@ -14,6 +14,7 @@
 #include <math.h>
 #include <time.h>
 #include <poll.h>
+#include <stdbool.h>
 
 #include "main.h"
 #include "timer.h"

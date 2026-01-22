@@ -1,6 +1,6 @@
 # Break
 
-Simple break timer for XServer that reminds you to rest.
+Simple configurable break timer for XServer that reminds you to rest.
 
 ![screenshot](https://0x405.ru/break/screenshot_a.png) ![screenshot](https://0x405.ru/break/screenshot_b.png)
 
@@ -112,4 +112,3 @@ end_sound_path = "end.wav"
 # Sound volume from 0.0 to 1.0
 volume = 0.8
 ```
-

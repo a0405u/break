@@ -22,6 +22,7 @@ typedef struct cfg
     time_t snooze_duration; // Duration between Warnings
 
     char font_color[16]; // Main foreground color
+    char background_font_color[16]; // Time font
     char background_color[16]; // Backgroung color
     char progress_color[16];
 
@@ -41,6 +42,11 @@ typedef struct cfg
     int hint_font_slant;
     int hint_font_weight;
     char hint_font_style[64];
+
+    int time_font_size;
+    int time_font_slant;
+    int time_font_weight;
+    char time_font_style[64];
 
     int margin;
     bool repeat;
@@ -73,8 +79,7 @@ typedef struct gctx
 {
     Config config;
     bool debug;
-    WindowContext break_wctx;
-    WindowContext warning_wctx;
+    WindowContext wctx;
 
     Display *display;
     int screen;
@@ -92,9 +97,11 @@ typedef struct gctx
     XftFont *message_font;
     XftFont *warning_font;
     XftFont *hint_font;
+    XftFont *time_font;
 
     XftColor font_color;
     XColor background_color;
+    XftColor background_font_color;
     XColor border_color;
     XColor progress_color;
 

@@ -19,12 +19,8 @@
 #include "timer.h"
 /*
     TODO:
-    - Bug: input while break
-    - Toggle warning
-    - Toggle skip
-    - Toggle snooze
-    - Toggle stop
-    - Stop break
+    - Window structure: Title, message, time left, hint
+    - Hard stop by solving puzzle / pressing long combination / writing a sentence
     - Separate audio.c, audio.h
     - Break time output
     - Time output bar
@@ -44,12 +40,19 @@
 
 static void load_defaults(Config *config)
 {
-    strcpy(config->title, "Take a break!");
-    strcpy(config->message, "Rest your eyes. Stretch your legs. Breathe. Relax.");
-    strcpy(config->warning, "Break starts in %ds.");
-    strcpy(config->warning_hint, "space - start, w - snooze, s - skip, q - quit");
-    strcpy(config->end_title, "Break has ended!");
-    strcpy(config->end_message, "Press any key to continue...");
+    strcpy(config->break_title_text, "Take a break!");
+    strcpy(config->break_message_text, "Rest your eyes. Stretch your legs. Breathe. Relax.");
+    strcpy(config->break_hint_text, "s - stop, q - quit");
+    strcpy(config->warning_message_text, "Break starts in %ds.");
+    strcpy(config->warning_hint_text, "space - start, w - snooze, s - skip, q - quit");
+    strcpy(config->end_title_text, "Break has ended!");
+    strcpy(config->end_message_text, "Press any key to continue...");
+
+    config->warning_enabled = true;
+    config->skip_enabled = true;
+    config->snooze_enabled = true;
+    config->stop_enabled = true;
+    config->end_enabled = true;
 
     config->timer_duration = 28 * 60;
     config->break_duration = 5 * 60;
@@ -217,12 +220,13 @@ static void load_config(Config *config)
             if (strcmp(key, #field) == 0) \
                 config->field = parse_color(value);
 
-        SET_STRING(title);
-        SET_STRING(message);
-        SET_STRING(warning);
-        SET_STRING(warning_hint);
-        SET_STRING(end_title);
-        SET_STRING(end_message);
+        SET_STRING(break_title_text);
+        SET_STRING(break_message_text);
+        SET_STRING(break_hint_text);
+        SET_STRING(warning_message_text);
+        SET_STRING(warning_hint_text);
+        SET_STRING(end_title_text);
+        SET_STRING(end_message_text);
 
         SET_DURATION(timer_duration);
         SET_DURATION(break_duration);
@@ -642,7 +646,7 @@ static void draw_progress(GlobalContext *gctx, WindowContext *wctx, double progr
 
 }
 
-static void draw_message(GlobalContext *gctx, char *title_text, char *message_text, WindowContext *wctx)
+static void draw_message(GlobalContext *gctx, char *title_text, char *message_text, char *hint_text, WindowContext *wctx)
 {
     // Calculate text extents
 
@@ -688,6 +692,18 @@ static void draw_message(GlobalContext *gctx, char *title_text, char *message_te
         message_line = strtok(NULL, "\n");
     }
 
+    // Draw Hint
+
+    if (hint_text)
+    {
+        XGlyphInfo hint_extents;
+        XftTextExtentsUtf8(gctx->display, gctx->hint_font, (XftChar8 *)hint_text, strlen(hint_text), &hint_extents);
+
+        int hint_text_x = (wctx->width - hint_extents.width) / 2;
+        int hint_text_y = wctx->height - hint_extents.height;
+        XftDrawStringUtf8(wctx->draw_context, &gctx->font_color, gctx->hint_font, hint_text_x, hint_text_y, (XftChar8 *)hint_text, strlen(hint_text));
+    }
+    
     // Update display
     XCopyArea(gctx->display, wctx->draw_buffer, wctx->window, wctx->graphics_context, 0, 0, wctx->width, wctx->height, 0, 0);
     XFlush(gctx->display);
@@ -773,14 +789,137 @@ static void parse_args(int argc, char **argv, GlobalContext *gctx)
 }
 
 
+GlobalState run_frame_event_loop(GlobalContext *gctx, FrameEventLoop *loop, void *userdata)
+{
+    XEvent event;
+    Timer timer = {0};
+    timer_start(&timer);
+    GlobalState state = STATE_NONE;
+
+    double next_frame = 0;
+
+    while (loop->duration <= 0 || timer_elapsed(&timer) < loop->duration) {
+        double elapsed = timer_elapsed(&timer);
+        double wait_time = next_frame - elapsed;
+        if (wait_time < 0) wait_time = 0;
+
+        int r = event_wait(gctx->display, &event, wait_time);
+        if (r == -1)
+            die("Failed input!\n");
+
+        if (r == 0) {
+            loop->on_frame(gctx, elapsed, loop->duration, userdata);
+            next_frame += gctx->frame_time;
+            continue;
+        }
+
+        state = loop->on_event(gctx, &event, userdata);
+        if (state != STATE_NONE) {
+            if (loop->on_exit) 
+                return loop->on_exit(gctx, state, userdata);
+            return state;
+        }
+    }
+    
+    state = STATE_TIMEOUT;
+    if (loop->on_exit) 
+        return loop->on_exit(gctx, state, userdata);
+    return state;
+}
+
+
 static GlobalState process_wait(GlobalContext *gctx)
 {
         sleep(gctx->config.timer_duration);
         
-        if (gctx->config.warning)
+        if (gctx->config.warning_enabled)
             return STATE_WARNING;
 
         return STATE_BREAK;
+}
+
+
+static void warning_on_frame(GlobalContext *gctx, double elapsed, double duration, void *ud)
+{
+    double time_left = duration - elapsed;
+    double progress = time_left / duration;
+
+    clear_window(gctx, &gctx->wctx, gctx->background_color);
+    draw_progress(gctx, &gctx->wctx, progress);
+    draw_warning(gctx, gctx->config.warning_message_text, gctx->config.warning_hint_text, (int)time_left, &gctx->wctx);
+}
+
+
+static GlobalState warning_on_event(GlobalContext *gctx, XEvent *event, void *ud)
+{
+    (void)ud;
+
+    if (event->type == ButtonPress)
+    {
+        XSetInputFocus(gctx->display, gctx->wctx.window, RevertToPointerRoot, CurrentTime);
+    }
+    else if (event->type == KeyPress)
+    {
+        KeySym key = XLookupKeysym(&event->xkey, 0);
+        switch (key)
+        {
+            case XK_space: 
+                return STATE_BREAK;
+            case XK_w: // Snooze
+                if (gctx->config.snooze_enabled)
+                    return STATE_WARNING;
+                break;
+            case XK_s: // Skip
+                if (gctx->config.skip_enabled)
+                    return STATE_WAIT;
+                break;
+            case XK_q: // Quit
+                return STATE_EXIT;
+        }
+    }
+    return STATE_NONE;
+}
+
+
+static GlobalState warning_on_exit(GlobalContext *gctx, GlobalState state, void *ud)
+{
+    switch (state)
+    {
+        case STATE_BREAK: 
+        case STATE_TIMEOUT:
+        {
+            printf("Breaking...\n");
+            XDestroyWindow(gctx->display, gctx->wctx.window);
+            return STATE_BREAK;
+        }
+        case STATE_WARNING: // Snooze
+        {
+            printf("Snoozing...\n");
+            XDestroyWindow(gctx->display, gctx->wctx.window);
+            XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+            XFlush(gctx->display);
+            sleep(gctx->config.snooze_duration);
+            return state;
+        }
+        case STATE_WAIT: // Skip
+        {
+            printf("Skipping...\n");
+            XDestroyWindow(gctx->display, gctx->wctx.window);
+            XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+            XFlush(gctx->display);
+            return state;
+        }
+        case STATE_EXIT: // Quit
+        {
+            printf("Quitting...\n");
+            return state;
+        }
+    }
+    (void)ud;
+    XDestroyWindow(gctx->display, gctx->wctx.window);
+    XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+    XFlush(gctx->display);
+    return state;
 }
 
 
@@ -804,94 +943,89 @@ static GlobalState process_warning(GlobalContext *gctx)
     // XGrabKeyboard(gctx->display, gctx->wctx.window, True, GrabModeAsync, GrabModeAsync, CurrentTime);
     XSelectInput(gctx->display, gctx->wctx.window, KeyPressMask | ButtonPressMask | ExposureMask);
 
-    XEvent event;
-    double warning_duration = gctx->config.warning_duration;
+    FrameEventLoop loop = {
+        .on_frame = warning_on_frame,
+        .on_event = warning_on_event,
+        .on_exit  = warning_on_exit,
+        .duration = gctx->config.warning_duration
+    };
 
-    double progress = 0;
-    Timer timer = {0};
-    timer_start(&timer);
+    return run_frame_event_loop(gctx, &loop, NULL);
+}
 
-    double elapsed = timer_elapsed(&timer);
-    double time_left = warning_duration;
-    double next_frame = elapsed;
-    double wait_time = 0.0d;
+static void break_on_frame(GlobalContext *gctx, double elapsed, double duration, void *ud)
+{
+    double time_left = duration - elapsed;
+    double progress = elapsed / duration;
 
-    while (elapsed < warning_duration) 
+    clear_window(gctx, &gctx->wctx, gctx->background_color);
+    draw_progress(gctx, &gctx->wctx, progress);
+    draw_message(gctx, gctx->config.break_title_text, gctx->config.break_message_text, gctx->config.break_hint_text, &gctx->wctx);
+}
+
+
+static GlobalState break_on_event(GlobalContext *gctx, XEvent *event, void *ud)
+{
+    (void)ud;
+
+    if (event->type == ButtonPress)
     {
-        elapsed = timer_elapsed(&timer);
-        time_left = warning_duration - elapsed;
-        double wait_time = next_frame - elapsed;
-
-        if (wait_time < 0) wait_time = 0.0d;
-        
-        switch (event_wait(gctx->display, &event, wait_time))
+        XSetInputFocus(gctx->display, gctx->wctx.window, RevertToPointerRoot, CurrentTime);
+    }
+    else if (event->type == KeyPress)
+    {
+        KeySym key = XLookupKeysym(&event->xkey, 0);
+        switch (key)
         {
-            case -1:
-                die("Failed input!\n");
-            case 0:
-                progress = time_left / warning_duration;
-                clear_window(gctx, &gctx->wctx, gctx->background_color);
-                draw_progress(gctx, &gctx->wctx, progress);
-                draw_warning(gctx, gctx->config.warning, gctx->config.warning_hint, (int)time_left, &gctx->wctx);
-                next_frame += gctx->frame_time;
-                continue;
-        }
-
-        switch (event.type)
-        {
-            case ButtonPress:
-            {
-                XSetInputFocus(gctx->display, gctx->wctx.window, RevertToPointerRoot, CurrentTime);
+            case XK_s: // Skip
+                if (gctx->config.stop_enabled)
+                    return STATE_WAIT;
                 break;
-            }
-            case KeyPress:
-            {
-                KeySym key = XLookupKeysym(&event.xkey, 0);
-                switch (key)
-                {
-                    case XK_space: 
-                    {
-                        printf("Breaking...\n");
-                        XDestroyWindow(gctx->display, gctx->wctx.window);
-                        return STATE_BREAK;
-                    }
-                    case XK_w: // Snooze
-                    {
-                        printf("Snoozing...\n");
-                        // XUngrabKeyboard(gctx->display, CurrentTime);
-                        // XUngrabPointer(gctx->display, CurrentTime);
-                        XDestroyWindow(gctx->display, gctx->wctx.window);
-                        XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
-                        XFlush(gctx->display);
-                        sleep(gctx->config.snooze_duration);
-                        return STATE_WARNING;
-                    }
-                    case XK_s: // Skip
-                    {
-                        printf("Skipping...\n");
-                        XDestroyWindow(gctx->display, gctx->wctx.window);
-                        XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
-                        XFlush(gctx->display);
-                        return STATE_WAIT;
-                    }
-                    case XK_q: // Quit
-                    {
-                        printf("Quitting...\n");
-                        XUngrabKeyboard(gctx->display, CurrentTime);
-                        XUngrabPointer(gctx->display, CurrentTime);
-                        XDestroyWindow(gctx->display, gctx->wctx.window);
-                        XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
-                        XCloseDisplay(gctx->display);
-                        return STATE_EXIT;
-                    }
-                }
+            case XK_q: // Quit
+                if (gctx->config.stop_enabled)
+                    return STATE_EXIT;
                 break;
-            }
         }
     }
-    printf("Breaking...\n");
+    return STATE_NONE;
+}
+
+
+static GlobalState break_on_exit(GlobalContext *gctx, GlobalState state, void *ud)
+{
+    (void)ud;
+
+    switch (state)
+    {
+        case STATE_END:
+        case STATE_TIMEOUT:
+        {
+            if (gctx->config.end_enabled)
+                return STATE_END;
+            return STATE_WAIT;
+        }
+        case STATE_WAIT: // Skip
+        {
+            printf("Skipping...\n");
+            XUngrabKeyboard(gctx->display, CurrentTime);
+            XUngrabPointer(gctx->display, CurrentTime);
+            XDestroyWindow(gctx->display, gctx->wctx.window);
+            XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+            XFlush(gctx->display);
+            return state;
+        }
+        case STATE_EXIT: // Quit
+        {
+            printf("Quitting...\n");
+            return state;
+        }
+    }
+    XUngrabKeyboard(gctx->display, CurrentTime);
+    XUngrabPointer(gctx->display, CurrentTime);
     XDestroyWindow(gctx->display, gctx->wctx.window);
-    return STATE_BREAK;
+    XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+    XFlush(gctx->display);
+    return state;
 }
 
 
@@ -901,59 +1035,43 @@ static GlobalState process_break(GlobalContext *gctx)
     XFlush(gctx->display);
 
     // Try to grab pointer and keyboard
-    XGrabPointer(gctx->display, gctx->wctx.window, True,
-                ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-                GrabModeAsync, GrabModeAsync,
-                None, None, CurrentTime);
+    XGrabPointer(gctx->display, gctx->wctx.window, True, ButtonPressMask | ButtonReleaseMask | PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
 
-    XGrabKeyboard(gctx->display, gctx->wctx.window,
-                True,
-                GrabModeAsync, GrabModeAsync,
-                CurrentTime);
+    XGrabKeyboard(gctx->display, gctx->wctx.window, True, GrabModeAsync, GrabModeAsync, CurrentTime);
     
     double progress = 0;
 
     // Draw break message
     clear_window(gctx, &gctx->wctx, gctx->background_color);
     draw_progress(gctx, &gctx->wctx, progress);
-    draw_message(gctx, gctx->config.title, gctx->config.message, &gctx->wctx);
+    draw_message(gctx, gctx->config.break_title_text, gctx->config.break_message_text, gctx->config.break_hint_text, &gctx->wctx);
 
     // Play sound
     play_wav_async(gctx->config.start_sound_path, gctx->config.volume);
 
-    // Process break
-    double duration = gctx->config.break_duration;
-    struct timespec start, now, delta;
-    clock_gettime(CLOCK_MONOTONIC, &start);
 
-    while (true)
-    {
-        clock_gettime(CLOCK_MONOTONIC, &now);
+    // Listen for keypresses
+    // XGrabKeyboard(gctx->display, gctx->wctx.window, True, GrabModeAsync, GrabModeAsync, CurrentTime);
+    XSelectInput(gctx->display, gctx->wctx.window, KeyPressMask | ButtonPressMask | ExposureMask);
 
-        double elapsed = (now.tv_sec - start.tv_sec) + (now.tv_nsec - start.tv_nsec) * 1e-9;
+    FrameEventLoop loop = {
+        .on_frame = break_on_frame,
+        .on_event = break_on_event,
+        .on_exit  = break_on_exit,
+        .duration = gctx->config.break_duration
+    };
 
-        progress = elapsed / (double)gctx->config.break_duration;
-        clear_window(gctx, &gctx->wctx, gctx->background_color);
-        draw_progress(gctx, &gctx->wctx, progress);
-        draw_message(gctx, gctx->config.title, gctx->config.message, &gctx->wctx);
-
-        if (elapsed >= gctx->config.break_duration)
-            break;
-
-        // Hold for a frame
-        delta.tv_sec = (time_t)gctx->frame_time;
-        delta.tv_nsec = (gctx->frame_time - (time_t)gctx->frame_time) * 1e9;
-        nanosleep(&delta, NULL);
-    }
+    return run_frame_event_loop(gctx, &loop, NULL);
 }
 
 
 static GlobalState process_end(GlobalContext *gctx)
 {
+    printf("Processing END state!\n");
     // Draw end message
     clear_window(gctx, &gctx->wctx, gctx->background_color);
     draw_progress(gctx, &gctx->wctx, 1.0);
-    draw_message(gctx, gctx->config.end_title, gctx->config.end_message, &gctx->wctx);
+    draw_message(gctx, gctx->config.end_title_text, gctx->config.end_message_text, NULL, &gctx->wctx);
 
     // Play sound
     play_wav_async(gctx->config.end_sound_path, gctx->config.volume);
@@ -975,6 +1093,7 @@ static GlobalState process_end(GlobalContext *gctx)
 
     if(gctx->config.repeat)
     {
+        printf("Waiting!\n");
         XUngrabKeyboard(gctx->display, CurrentTime);
         XUngrabPointer(gctx->display, CurrentTime);
         XDestroyWindow(gctx->display, gctx->wctx.window);
@@ -984,6 +1103,7 @@ static GlobalState process_end(GlobalContext *gctx)
         return STATE_WAIT;
     }
 
+    printf("Exiting!\n");
     return STATE_EXIT;
 }
 
@@ -1030,10 +1150,8 @@ int main(int argc, char **argv)
             case STATE_END:
                 state = process_end(&gctx);
                 break;
-            default:
-                state = process_exit(&gctx);
-                break;
         }
     }
+    process_exit(&gctx);
     return 0;
 }

@@ -18,6 +18,8 @@ typedef struct cfg
     bool end_enabled;
     bool hints_enabled;
     bool time_enabled;
+    bool sound_enabled;
+    bool block_input;
 
     time_t timer_duration; // Time before/between Breaks
     time_t break_duration; // Duration of Breaks
@@ -123,8 +125,10 @@ typedef enum {
     STATE_NONE,
     STATE_WAIT,
     STATE_WARNING,
+    STATE_SNOOZE,
     STATE_BREAK,
     STATE_END,
+    STATE_RESTART,
     STATE_EXIT,
     STATE_TIMEOUT
 } GlobalState;

@@ -117,8 +117,8 @@ static void load_defaults(Config *config)
 
     config->fps = 60;
 
-    strcpy(config->start_sound_path, "start.wav");
-    strcpy(config->end_sound_path, "end.wav");
+    strcpy(config->start_sound_path, "sounds/start.wav");
+    strcpy(config->end_sound_path, "sounds/end.wav");
     config->volume = 0.8;
 }
 

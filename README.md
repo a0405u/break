@@ -42,6 +42,10 @@ end_enabled = true
 hints_enabled = true
 # Enable time output
 time_enabled = true
+# Enable sound
+sound_enabled = true
+# Block all input on break (excluding break application)
+block_input = false
 
 # Time is specified in such maner: XXh YYm ZZs
 # Time between breaks

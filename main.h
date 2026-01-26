@@ -28,6 +28,9 @@ typedef struct cfg
 
     bool repeat;
 
+    bool detect_idle;
+    time_t idle_limit;
+
     char font_color[16]; // Main foreground color
     char hint_font_color[16]; // Hint font color
     char background_font_color[16]; // Time font color

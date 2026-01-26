@@ -2,6 +2,7 @@
 #include <X11/Xutil.h>
 #include <X11/Xft/Xft.h>
 #include <X11/keysym.h>
+#include <X11/extensions/scrnsaver.h>
 #include <pthread.h>
 #include <ao/ao.h>
 #include <stdio.h>
@@ -20,23 +21,22 @@
 #include "timer.h"
 
 /*
-    Release:
-    X Bug: Wrong last focus, needs update on each warning / break
-    X Bug: Break without warning
-    X Bug: Exit without end
-    X Bug: Repeat
+    To Do:
+    - RENAME: cbreak, breakc, breaksy, xbreak
+    X Bug: Sounds in sound folder
+    - Bug: No end sound without end screen
     - README: Custom license
     - README: Build requirements
     - README: List of Features
-
-    To Do:
-    - Bug: No end sound without end screen
+    - Config: Keyboard settings
+    - Config: Load sounds from config folder
     - Config: Separate font for time
     - Config: Disable time output
     - Config: End colors
     - Config: Disable idle detection
     - Config: Disable sound
-    - Feature: Detect Idle time
+    - Feature: Warning sound
+    X Feature: Detect Idle time
     - Feature: Time left on warning
     - Feature: Hard stop by solving puzzle / pressing long combination / writing a sentence
     - Feature: Break time output
@@ -79,6 +79,9 @@ static void load_defaults(Config *config)
     config->snooze_duration = 60;
 
     config->repeat = true;
+
+    config->detect_idle = true;
+    config->idle_limit = 5 * 60;
 
     strcpy(config->font_color, "#ffffff");
     strcpy(config->hint_font_color, "#aaaaaa");
@@ -295,12 +298,16 @@ static void load_config(Config *config)
         SET_BOOL(sound_enabled);
         SET_BOOL(block_input);
 
+
         SET_DURATION(timer_duration);
         SET_DURATION(break_duration);
         SET_DURATION(warning_duration);
         SET_DURATION(snooze_duration);
 
         SET_BOOL(repeat);
+
+        SET_BOOL(detect_idle);
+        SET_DURATION(idle_limit);
 
         SET_STRING(font_color);
         SET_STRING(hint_font_color);
@@ -393,7 +400,11 @@ static void apply_volume(char *buf, size_t bytes, int bits, float volume)
 int play_wav(const char *path, float volume)
 {
     FILE *f = fopen(path, "rb");
-    if (!f) return -1;
+    if (!f)
+    {
+        printf("Sound file is not available!\n");
+        return -1;
+    }
 
     WavHeader h;
     if (fread(&h, sizeof(h), 1, f) != 1) 
@@ -950,7 +961,8 @@ GlobalState run_frame_event_loop(GlobalContext *gctx, FrameEventLoop *loop, void
 
     double next_frame = 0;
 
-    while (loop->duration <= 0 || timer_elapsed(&timer) < loop->duration) {
+    while (loop->duration <= 0 || timer_elapsed(&timer) < loop->duration) 
+    {
         double elapsed = timer_elapsed(&timer);
         double wait_time = next_frame - elapsed;
         if (wait_time < 0) wait_time = 0;
@@ -959,14 +971,16 @@ GlobalState run_frame_event_loop(GlobalContext *gctx, FrameEventLoop *loop, void
         if (r == -1)
             die("Failed input!\n");
 
-        if (r == 0) {
+        if (r == 0) 
+        {
             loop->on_frame(gctx, elapsed, loop->duration, userdata);
             next_frame += gctx->frame_time;
             continue;
         }
 
         state = loop->on_event(gctx, &event, userdata);
-        if (state != STATE_NONE) {
+        if (state != STATE_NONE) 
+        {
             if (loop->on_exit) 
                 return loop->on_exit(gctx, state, userdata);
             return state;
@@ -984,7 +998,24 @@ static GlobalState process_wait(GlobalContext *gctx)
 {
     printf("Waiting...\n");
 
-    sleep(gctx->config.timer_duration);
+    // If detecting idle we check it every second
+    if (gctx->config.detect_idle)
+    {
+        XScreenSaverInfo *info = XScreenSaverAllocInfo();
+        for (uint t = 0; t < gctx->config.timer_duration; t++)
+        {
+            XScreenSaverQueryInfo(gctx->display, gctx->root, info);
+            if (info->idle / 1000u > gctx->config.idle_limit)
+                t = 0; // Reset timer
+            sleep(1);
+        }
+        XFree(info);
+    }
+    // In other case we sleep whole time
+    else
+    {
+        sleep(gctx->config.timer_duration);
+    }
     
     if (gctx->config.warning_enabled)
         return STATE_WARNING;
@@ -1173,7 +1204,8 @@ static GlobalState process_break(GlobalContext *gctx)
     draw_message(gctx, gctx->config.break_title_text, gctx->config.break_message_text, gctx->config.break_hint_text, gctx->config.break_duration, &gctx->wctx);
 
     // Play sound
-    play_wav_async(gctx->config.start_sound_path, gctx->config.volume);
+    if (gctx->config.sound_enabled)
+        play_wav_async(gctx->config.start_sound_path, gctx->config.volume);
 
 
     // Listen for keypresses
@@ -1201,7 +1233,8 @@ static GlobalState process_end(GlobalContext *gctx)
     draw_message(gctx, gctx->config.end_title_text, gctx->config.end_message_text, gctx->config.end_hint_text, 0, &gctx->wctx);
 
     // Play sound
-    play_wav_async(gctx->config.end_sound_path, gctx->config.volume);
+    if (gctx->config.sound_enabled)
+        play_wav_async(gctx->config.end_sound_path, gctx->config.volume);
 
     // Listen for keypresses
     XSelectInput(gctx->display, gctx->wctx.window, KeyPressMask | ExposureMask);

@@ -22,9 +22,10 @@
 
 /*
     To Do:
-    - RENAME: cbreak, breakc, breaksy, xbreak
+    X RENAME: cbreak, breakc, breaksy, xbreak, xcalm, ! xrest, xrist !
     X Bug: Sounds in sound folder
     - Bug: No end sound without end screen
+    - Bug: Random skips while working by accident pressing S
     - README: Custom license
     - README: Build requirements
     - README: List of Features
@@ -144,9 +145,9 @@ static void get_config_path(char *buffer, size_t length)
     const char *home = getenv("HOME");
 
     if (xdg)
-        snprintf(buffer, length, "%s/break/config.ini", xdg);
+        snprintf(buffer, length, "%s/xrest/config.ini", xdg);
     else if (home)
-        snprintf(buffer, length, "%s/.config/break/config.ini", home);
+        snprintf(buffer, length, "%s/.config/xrest/config.ini", home);
     else
         snprintf(buffer, length, "config.ini");
 }

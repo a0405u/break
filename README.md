@@ -1,16 +1,16 @@
-# Break
+# xrest
 
-Simple configurable break timer for XServer that reminds you to rest.
+Simple configurable break timer for Xserver that reminds you to rest.
 
-![screenshot](https://0x405.ru/break/screenshot_a.png) ![screenshot](https://0x405.ru/break/screenshot_b.png)
+![screenshot](https://0x405.ru/xrest/screenshot_a.png) ![screenshot](https://0x405.ru/xrest/screenshot_b.png)
 
 Use the following command to build:
 
 ```sh
-gcc main.c timer.c -o break -lX11 -lXft -I/usr/include/freetype2 -lm -lao
+gcc main.c timer.c -o xrest -lX11 -lXft -lXss -I/usr/include/freetype2 -lm -lao
 ```
 
-Put your config in `$XDG_CONFIG_HOME/break/config.ini`
+Put your config in `$XDG_CONFIG_HOME/xrest/config.ini`
 Example and defaults:
 
 ```ini
@@ -59,6 +59,11 @@ snooze_duration = 3m
 
 # Restart timer on end
 repeat = true
+
+# Skip break on idle
+detect_idle = true
+# Idle time limit to skip break
+idle_limit = 5m
 
 # Color specifications in #rrggbb format
 font_color = #ffffff
@@ -109,10 +114,12 @@ margin = 12
 # Screen update limit
 fps = 60
 
-# Break start sound, only WAV is supported
-start_sound_path = "start.wav"
-# Break end sound, only WAV is supported
-end_sound_path = "end.wav"
+# Only WAV is currently supported
+# Paths are relative to $XDG_CONFIG_HOME/xrest/
+# Break start sound
+start_sound_path = "sounds/start.wav"
+# Break end sound
+end_sound_path = "sounds/end.wav"
 # Sound volume from 0.0 to 1.0
 volume = 0.8
 ```

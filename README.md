@@ -150,3 +150,5 @@ end_sound_path = "/opt/xrest/sounds/end.wav"
 # Sound volume from 0.0 to 1.0
 volume = 0.8
 ```
+
+This project is licensed under the Ethical MIT License – see LICENSE file for details.

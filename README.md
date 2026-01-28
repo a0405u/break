@@ -8,14 +8,14 @@ Simple configurable break timer for Xserver that reminds you to rest.
 
 Install dependencies (example for Ubuntu/Debian):
 
-```sh
+```bash
 sudo apt update
 sudo apt install libx11-dev libxft-dev libxss-dev
 ```
 
 Build application:
 
-```sh
+```bash
 gcc main.c timer.c -o xrest -lX11 -lXft -lXss -I/usr/include/freetype2 -lm -lao
 chmod +x xrest
 ```
@@ -24,14 +24,14 @@ chmod +x xrest
 
 Create application folder and move everything there:
 
-```sh
+```bash
 sudo mkdir -p /opt/xrest
 sudo cp -r xrest sounds /opt/xrest/
 ```
 
 Create a symlink to be able to run the app:
 
-```sh
+```bash
 sudo ln -s /opt/xrest/xrest /usr/local/bin/xrest
 ```
 

@@ -153,7 +153,7 @@ static void get_config_folder(char *buffer, size_t length)
 }
 
 
-static void get_config_path(char *buffer, size_t length)
+static void get_config_file(char *buffer, size_t length)
 {
     get_config_folder(buffer, length);
     strcat(buffer, "config.ini");
@@ -241,7 +241,7 @@ static void parse_string(char *dst, size_t dst_size, const char *src)
 static void load_config(Config *config)
 {
     char path[512];
-    get_config_path(path, sizeof(path));
+    get_config_file(path, sizeof(path));
 
     FILE *f = fopen(path, "r");
     if (!f)
@@ -407,10 +407,6 @@ static void apply_volume(char *buf, size_t bytes, int bits, float volume)
 
 int play_wav(const char *path, float volume)
 {
-    char full_path[512];
-    get_config_folder(full_path, sizeof(full_path));
-    strcat(full_path, path);
-
     FILE *f = fopen(path, "rb");
     if (!f)
     {

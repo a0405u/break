@@ -4,14 +4,42 @@ Simple configurable break timer for Xserver that reminds you to rest.
 
 ![screenshot](https://0x405.ru/xrest/screenshot_a.png) ![screenshot](https://0x405.ru/xrest/screenshot_b.png)
 
-Use the following command to build:
+## Build
+
+Install dependencies (example for Ubuntu/Debian):
+
+```sh
+sudo apt update
+sudo apt install libx11-dev libxft-dev libxss-dev
+```
+
+Build application:
 
 ```sh
 gcc main.c timer.c -o xrest -lX11 -lXft -lXss -I/usr/include/freetype2 -lm -lao
+chmod +x xrest
 ```
 
+## Install
+
+Create application folder and move everything there:
+
+```sh
+sudo mkdir -p /opt/xrest
+sudo cp -r xrest sounds /opt/xrest/
+```
+
+Create a symlink to be able to run the app:
+
+```sh
+sudo ln -s /opt/xrest/xrest /usr/local/bin/xrest
+```
+
+## Configure
+
 Put your config in `$XDG_CONFIG_HOME/xrest/config.ini`
-Example and defaults:
+
+Example config with defaults:
 
 ```ini
 # Text on the break screen
@@ -115,11 +143,10 @@ margin = 12
 fps = 60
 
 # Only WAV is currently supported
-# Paths are relative to $XDG_CONFIG_HOME/xrest/
 # Break start sound
-start_sound_path = "sounds/start.wav"
+start_sound_path = "/opt/xrest/sounds/start.wav"
 # Break end sound
-end_sound_path = "sounds/end.wav"
+end_sound_path = "/opt/xrest/sounds/end.wav"
 # Sound volume from 0.0 to 1.0
 volume = 0.8
 ```

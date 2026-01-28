@@ -139,17 +139,24 @@ static void load_dev(Config *config)
 }
 
 
-static void get_config_path(char *buffer, size_t length)
+static void get_config_folder(char *buffer, size_t length)
 {
     const char *xdg = getenv("XDG_CONFIG_HOME");
     const char *home = getenv("HOME");
 
     if (xdg)
-        snprintf(buffer, length, "%s/xrest/config.ini", xdg);
+        snprintf(buffer, length, "%s/xrest/", xdg);
     else if (home)
-        snprintf(buffer, length, "%s/.config/xrest/config.ini", home);
+        snprintf(buffer, length, "%s/.config/xrest/", home);
     else
-        snprintf(buffer, length, "config.ini");
+        snprintf(buffer, length, "./");
+}
+
+
+static void get_config_path(char *buffer, size_t length)
+{
+    get_config_folder(buffer, length);
+    strcat(buffer, "config.ini");
 }
 
 
@@ -400,6 +407,10 @@ static void apply_volume(char *buf, size_t bytes, int bits, float volume)
 
 int play_wav(const char *path, float volume)
 {
+    char full_path[512];
+    get_config_folder(full_path, sizeof(full_path));
+    strcat(full_path, path);
+
     FILE *f = fopen(path, "rb");
     if (!f)
     {

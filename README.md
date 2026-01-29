@@ -151,6 +151,8 @@ end_sound_path = "/opt/xrest/sounds/end.wav"
 volume = 0.8
 ```
 
-Legally, this project is licensed under the MIT License – see LICENSE file for details.
+---
+
+Legally, this project is licensed under the MIT License. See LICENSE file for details.
 
 Morally, the Author opposes the intentional use of the provided code or software to harm any person, whether to their body or soul. See the STATEMENT file for details.

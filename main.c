@@ -607,8 +607,18 @@ static XftFont *load_xft_font(GlobalContext *gctx, const char *family, int size,
 }
 
 
+// static int xerror_handler(Display *display, XErrorEvent *error)
+// {
+//     if (error->error_code == BadWindow)
+//         xerror_flag = 1;
+//     return 0; // don't exit
+// }
+
+
 static void init(GlobalContext *gctx)
 {
+    // XSetErrorHandler(my_handler);
+
     gctx->display = XOpenDisplay(NULL);
     if (!gctx->display)
         die("Can't open display\n");
@@ -660,7 +670,7 @@ static void init(GlobalContext *gctx)
     gctx->time_font = load_xft_font(gctx, gctx->config.font_name, gctx->config.time_font_size, gctx->config.time_font_style, gctx->config.time_font_weight, gctx->config.time_font_slant);
 
     /* ---- FOCUS ---- */
-    XGetInputFocus(gctx->display, &gctx->last_focus, &gctx->revert_to);
+    // XGetInputFocus(gctx->display, &gctx->last_focus, &gctx->revert_to);
 }
 
 
@@ -945,11 +955,11 @@ static void parse_args(int argc, char **argv, GlobalContext *gctx)
 
 static void set_input_focus(GlobalContext *gctx, Window window)
 {
-    Window last_focus;
-    XGetInputFocus(gctx->display, &last_focus, &gctx->revert_to);
-    if (last_focus != gctx->wctx.window && last_focus != gctx->prev_window)
-        gctx->last_focus = last_focus;
-    XSetInputFocus(gctx->display, window, RevertToNone, CurrentTime);      
+    // Window last_focus;
+    // XGetInputFocus(gctx->display, &last_focus, &gctx->revert_to);
+    // if (last_focus != gctx->wctx.window && last_focus != gctx->prev_window)
+    //     gctx->last_focus = last_focus;
+    XSetInputFocus(gctx->display, window, RevertToParent, CurrentTime);      
 }
 
 
@@ -1106,7 +1116,7 @@ static GlobalState process_warning(GlobalContext *gctx)
     int warning_x = (gctx->screen_width  - warning_width) / 2;
     int warning_y = (gctx->screen_height - warning_height) / 2;
 
-    gctx->prev_window = gctx->wctx.window;
+    // gctx->prev_window = gctx->wctx.window;
     gctx->wctx = spawn_window(gctx, warning_width, warning_height, warning_x, warning_y, gctx->config.border_width, &gctx->background_color, true);
 
     // Manage window focus
@@ -1209,7 +1219,7 @@ static GlobalState process_break(GlobalContext *gctx)
         resize_window(gctx, &gctx->wctx, gctx->screen_width, gctx->screen_height, 0, 0);
     else
     {
-        gctx->prev_window = gctx->wctx.window;
+        // gctx->prev_window = gctx->wctx.window;
         gctx->wctx = spawn_window(gctx, gctx->screen_width, gctx->screen_height, 0, 0, 0, &gctx->background_color, true);
     }
     set_input_focus(gctx, gctx->wctx.window);
@@ -1290,7 +1300,7 @@ static GlobalState process_snooze(GlobalContext *gctx)
 {
     printf("Snoozing...\n");
     XDestroyWindow(gctx->display, gctx->wctx.window);
-    XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+    // XSetInputFocus(gctx->display, gctx->last_focus, RevertToParent, CurrentTime);
     XFlush(gctx->display);
     sleep(gctx->config.snooze_duration);
         
@@ -1312,7 +1322,7 @@ static GlobalState process_restart(GlobalContext *gctx)
     }
     XDestroyWindow(gctx->display, gctx->wctx.window);
 
-    XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+    // XSetInputFocus(gctx->display, gctx->last_focus, RevertToParent, CurrentTime);
     XFlush(gctx->display);
 
     return STATE_WAIT;
@@ -1329,7 +1339,7 @@ static GlobalState process_exit(GlobalContext *gctx)
     }
     XDestroyWindow(gctx->display, gctx->wctx.window);
 
-    XSetInputFocus(gctx->display, gctx->last_focus, RevertToNone, CurrentTime);
+    // XSetInputFocus(gctx->display, gctx->last_focus, RevertToParent, CurrentTime);
     XCloseDisplay(gctx->display);
 
     return STATE_EXIT;

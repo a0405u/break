@@ -6,33 +6,30 @@ Simple configurable break timer for Xserver that reminds you to rest.
 
 ## Build
 
-Install dependencies (example for Ubuntu/Debian):
+Install dependencies.
+
+Example for Ubuntu/Debian:
 
 ```bash
 sudo apt update
 sudo apt install libx11-dev libxft-dev libxss-dev
 ```
 
+Example for Alpine Linux:
+```bash
+doas apk add libx11-dev libxft-dev libxscrnsaver-dev
+```
+
 Build application:
 
 ```bash
-gcc main.c timer.c -o xrest -lX11 -lXft -lXss -I/usr/include/freetype2 -lm -lao
-chmod +x xrest
+make
 ```
 
 ## Install
 
-Create application folder and move everything there:
-
 ```bash
-sudo mkdir -p /opt/xrest
-sudo cp -r xrest sounds /opt/xrest/
-```
-
-Create a symlink to be able to run the app:
-
-```bash
-sudo ln -s /opt/xrest/xrest /usr/local/bin/xrest
+sudo make install
 ```
 
 ## Configure
@@ -144,9 +141,9 @@ fps = 60
 
 # Only WAV is currently supported
 # Break start sound
-start_sound_path = "/opt/xrest/sounds/start.wav"
+start_sound_path = "/usr/local/share/xrest/sounds/start.wav"
 # Break end sound
-end_sound_path = "/opt/xrest/sounds/end.wav"
+end_sound_path = "/usr/local/share/xrest/sounds/end.wav"
 # Sound volume from 0.0 to 1.0
 volume = 0.8
 ```
@@ -155,4 +152,4 @@ volume = 0.8
 
 Legally, this project is licensed under the MIT License. See LICENSE file for details.
 
-Morally, the Author opposes the intentional use of the provided code or software to harm any person, whether to their body or soul. See the STATEMENT file for details.
+Morally, the Author opposes the intentional use of the provided code or software in a harmful way. See the STATEMENT file for details.

@@ -22,25 +22,22 @@
 
 /*
     To Do:
-    X RENAME: cbreak, breakc, breaksy, xbreak, xcalm, ! xrest, xrist !
-    X Bug: Sounds in sound folder
     - Bug: No end sound without end screen
-    - Bug: Random skips while working by accident pressing S
-    - README: Custom license
-    - README: Build requirements
+    - Bug: Random skips while working by accidently pressing S or Q
+    - Bug: Uncheangeable hint with real shortcuts, excluding disabled ones
+    - Bug: Move to top on click
     - README: List of Features
     - Config: Keyboard settings
-    - Config: Load sounds from config folder
     - Config: Separate font for time
     - Config: Disable time output
     - Config: End colors
     - Config: Disable idle detection
     - Config: Disable sound
+    - Config: Separate stop from skip
+    - Feature: Detect not idle time without input
     - Feature: Warning sound
-    X Feature: Detect Idle time
     - Feature: Time left on warning
     - Feature: Hard stop by solving puzzle / pressing long combination / writing a sentence
-    - Feature: Break time output
     - Feature: Global commands with breakc
     - Feature: System notification instead of warning?
     - Feature: Tray icon
@@ -55,10 +52,10 @@ static void load_defaults(Config *config)
 {
     strcpy(config->break_title_text, "Break time!");
     strcpy(config->break_message_text, "Rest your eyes. Stretch your legs. Breathe. Relax.");
-    strcpy(config->break_hint_text, "s - stop, q - quit");
+    strcpy(config->break_hint_text, "ctrl+s - stop, ctrl+q - quit");
 
     strcpy(config->warning_message_text, "Please, take a break!");
-    strcpy(config->warning_hint_text, "space - start, w - snooze, s - skip, q - quit");
+    strcpy(config->warning_hint_text, "space - start, w - snooze, ctrl+s - skip, ctrl+q - quit");
 
     strcpy(config->end_title_text, "Break has ended!");
     strcpy(config->end_message_text, "Work fruitfully. Concentrate on important. Don't get distracted.");
@@ -77,7 +74,7 @@ static void load_defaults(Config *config)
     config->timer_duration = 28 * 60;
     config->break_duration = 5 * 60;
     config->warning_duration = 60;
-    config->snooze_duration = 60;
+    config->snooze_duration = 3 * 60;
 
     config->repeat = true;
 
@@ -121,8 +118,8 @@ static void load_defaults(Config *config)
 
     config->fps = 60;
 
-    strcpy(config->start_sound_path, "sounds/start.wav");
-    strcpy(config->end_sound_path, "sounds/end.wav");
+    strcpy(config->start_sound_path, "/usr/local/share/xrest/sounds/start.wav");
+    strcpy(config->end_sound_path, "/usr/local/share/xrest/sounds/end.wav");
     config->volume = 0.8;
 }
 
@@ -954,7 +951,7 @@ static void set_input_focus(GlobalContext *gctx, Window window)
 {
     Window last_focus;
     XGetInputFocus(gctx->display, &last_focus, &gctx->revert_to);
-    if (last_focus != gctx->wctx.window)
+    if (last_focus != gctx->wctx.window && last_focus != gctx->prev_window)
         gctx->last_focus = last_focus;
     XSetInputFocus(gctx->display, window, RevertToNone, CurrentTime);      
 }
@@ -1047,6 +1044,9 @@ static GlobalState warning_on_event(GlobalContext *gctx, XEvent *event, void *ud
 {
     (void)ud;
 
+    int ctrl = event->xkey.state & ControlMask;
+    int shift = event->xkey.state & ShiftMask;
+
     if (event->type == ButtonPress)
     {
         set_input_focus(gctx, gctx->wctx.window);
@@ -1063,11 +1063,13 @@ static GlobalState warning_on_event(GlobalContext *gctx, XEvent *event, void *ud
                     return STATE_SNOOZE;
                 break;
             case XK_s: // Skip
-                if (gctx->config.skip_enabled)
+                if (gctx->config.skip_enabled && ctrl)
                     return STATE_RESTART;
                 break;
             case XK_q: // Quit
-                return STATE_EXIT;
+                if (ctrl)
+                    return STATE_EXIT;
+                break;
         }
     }
     return STATE_NONE;
@@ -1092,12 +1094,15 @@ static GlobalState warning_on_exit(GlobalContext *gctx, GlobalState state, void 
 
 static GlobalState process_warning(GlobalContext *gctx)
 {
+    printf("Giving a warning...\n");
+
     uint warning_width = pt_to_px(gctx->config.warning_width, gctx->dpi);
     uint warning_height = pt_to_px(gctx->config.warning_height, gctx->dpi);
 
     int warning_x = (gctx->screen_width  - warning_width) / 2;
     int warning_y = (gctx->screen_height - warning_height) / 2;
 
+    gctx->prev_window = gctx->wctx.window;
     gctx->wctx = spawn_window(gctx, warning_width, warning_height, warning_x, warning_y, gctx->config.border_width, &gctx->background_color, true);
 
     // Manage window focus
@@ -1135,6 +1140,9 @@ static GlobalState break_on_event(GlobalContext *gctx, XEvent *event, void *ud)
 {
     (void)ud;
 
+    int ctrl = event->xkey.state & ControlMask;
+    int shift = event->xkey.state & ShiftMask;
+
     if (event->type == ButtonPress)
     {
         set_input_focus(gctx, gctx->wctx.window);
@@ -1145,11 +1153,11 @@ static GlobalState break_on_event(GlobalContext *gctx, XEvent *event, void *ud)
         switch (key)
         {
             case XK_s: // Skip
-                if (gctx->config.stop_enabled)
+                if (gctx->config.stop_enabled && ctrl)
                     return STATE_RESTART;
                 break;
             case XK_q: // Quit
-                if (gctx->config.stop_enabled)
+                if (gctx->config.stop_enabled && ctrl)
                     return STATE_EXIT;
                 break;
         }
@@ -1192,7 +1200,10 @@ static GlobalState process_break(GlobalContext *gctx)
     if (gctx->config.warning_enabled)
         resize_window(gctx, &gctx->wctx, gctx->screen_width, gctx->screen_height, 0, 0);
     else
+    {
+        gctx->prev_window = gctx->wctx.window;
         gctx->wctx = spawn_window(gctx, gctx->screen_width, gctx->screen_height, 0, 0, 0, &gctx->background_color, true);
+    }
     set_input_focus(gctx, gctx->wctx.window);
     XRaiseWindow(gctx->display, gctx->wctx.window);
     XFlush(gctx->display);

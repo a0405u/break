@@ -116,7 +116,8 @@ typedef struct gctx
     XColor border_color;
     XColor progress_color;
 
-    Window last_focus;
+    Window last_focus; // Last focused window except the app ones
+    Window prev_window; // Previous app window
     int revert_to;
 
     double frame_time;

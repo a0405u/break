@@ -4,7 +4,7 @@ CC=cc
 
 INCS=`${PKG_CONFIG} --cflags freetype2`
 LIBS=-lX11 -lXft -lXss -lm -lao
-CFLAGS=-01 #-Wall -Wextra
+CFLAGS=-O1 -Wall -Wextra
 
 xrest: main.c timer.c
 	${CC} main.c timer.c -o xrest ${INCS} ${CFLAGS} ${LIBS} ${LDFLAGS}

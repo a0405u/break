@@ -23,28 +23,24 @@
 /*
     To Do:
     - Bug: No end sound without end screen
-    - Bug: Random skips while working by accidently pressing S or Q
     - Bug: Uncheangeable hint with real shortcuts, excluding disabled ones
     - Bug: Move to top on click
-    - README: List of Features
     - Config: Keyboard settings
     - Config: Separate font for time
-    - Config: Disable time output
     - Config: End colors
-    - Config: Disable idle detection
-    - Config: Disable sound
     - Config: Separate stop from skip
-    - Feature: Detect not idle time without input
+    - Feature: Display the number of snoozes/skips, time without break
+    - Feature: Detect non idle time without input
     - Feature: Warning sound
     - Feature: Time left on warning
     - Feature: Hard stop by solving puzzle / pressing long combination / writing a sentence
-    - Feature: Global commands with breakc
+    - Feature: Global commands with xrestc
     - Feature: System notification instead of warning?
     - Feature: Tray icon
     - Feature: Quit from end screen
-    - Refactor: Separate audio.c, audio.h
-    - Refactor: Function names, 
-    - Refactor: Classes?
+    - Refactor: Separate audio
+    - Refactor: Separate config
+    - Refactor: Function names 
     - Managed / unmanaged?
 */
 
@@ -52,10 +48,10 @@ static void load_defaults(Config *config)
 {
     strcpy(config->break_title_text, "Break time!");
     strcpy(config->break_message_text, "Rest your eyes. Stretch your legs. Breathe. Relax.");
-    strcpy(config->break_hint_text, "ctrl+s - stop, ctrl+q - quit");
+    strcpy(config->break_hint_text, "^S - stop, ^Q - quit");
 
     strcpy(config->warning_message_text, "Please, take a break!");
-    strcpy(config->warning_hint_text, "space - start, w - snooze, ctrl+s - skip, ctrl+q - quit");
+    strcpy(config->warning_hint_text, "^Space - start, ^W - snooze, ^S - skip, ^Q - quit");
 
     strcpy(config->end_title_text, "Break has ended!");
     strcpy(config->end_message_text, "Work fruitfully. Concentrate on important. Don't get distracted.");
@@ -508,32 +504,32 @@ int play_wav(const char *path, float volume)
 }
 
 
-static void play_sine()
-{
-    ao_initialize();
-
-    int driver = ao_default_driver_id();
-
-    ao_sample_format format = {
-        .bits = 16,
-        .channels = 1,
-        .rate = 44100,
-        .byte_format = AO_FMT_LITTLE
-    };
-
-    ao_device *device = ao_open_live(driver, &format, NULL);
-    if (!device) return;
-
-    short buf[44100];
-    for (int i = 0; i < 44100; i++) {
-        buf[i] = (short)(sin(2 * M_PI * 440 * i / 44100.0) * 30000);
-    }
-
-    ao_play(device, (char*)buf, sizeof(buf));
-
-    ao_close(device);
-    ao_shutdown();
-}
+// static void play_sine()
+// {
+//     ao_initialize();
+//
+//     int driver = ao_default_driver_id();
+//
+//     ao_sample_format format = {
+//         .bits = 16,
+//         .channels = 1,
+//         .rate = 44100,
+//         .byte_format = AO_FMT_LITTLE
+//     };
+//
+//     ao_device *device = ao_open_live(driver, &format, NULL);
+//     if (!device) return;
+//
+//     short buf[44100];
+//     for (int i = 0; i < 44100; i++) {
+//         buf[i] = (short)(sin(2 * M_PI * 440 * i / 44100.0) * 30000);
+//     }
+//
+//     ao_play(device, (char*)buf, sizeof(buf));
+//
+//     ao_close(device);
+//     ao_shutdown();
+// }
 
 
 typedef struct 
@@ -818,7 +814,7 @@ static void draw_message(GlobalContext *gctx, char *title_text, char *message_te
     int message_lines_count = 0;
 
     const char *c = message_text;
-    while (c = strchr(c, '\n')) 
+    while ((c = strchr(c, '\n'))) 
     {
         message_lines_count++;
         c++; // Move past the found newline
@@ -1010,7 +1006,7 @@ static GlobalState process_wait(GlobalContext *gctx)
         for (uint t = 0; t < gctx->config.timer_duration; t++)
         {
             XScreenSaverQueryInfo(gctx->display, gctx->root, info);
-            if (info->idle / 1000u > gctx->config.idle_limit)
+            if (info->idle / 1000u > (unsigned long)gctx->config.idle_limit)
                 t = 0; // Reset timer
             sleep(1);
         }
@@ -1031,6 +1027,8 @@ static GlobalState process_wait(GlobalContext *gctx)
 
 static void warning_on_frame(GlobalContext *gctx, double elapsed, double duration, void *ud)
 {
+    (void)ud;
+
     double time_left = duration - elapsed;
     double progress = time_left / duration;
 
@@ -1045,7 +1043,7 @@ static GlobalState warning_on_event(GlobalContext *gctx, XEvent *event, void *ud
     (void)ud;
 
     int ctrl = event->xkey.state & ControlMask;
-    int shift = event->xkey.state & ShiftMask;
+    // int shift = event->xkey.state & ShiftMask;
 
     if (event->type == ButtonPress)
     {
@@ -1057,13 +1055,15 @@ static GlobalState warning_on_event(GlobalContext *gctx, XEvent *event, void *ud
         switch (key)
         {
             case XK_space: 
-                return STATE_BREAK;
+                if (ctrl)
+                    return STATE_BREAK;
+                break;
             case XK_w: // Snooze
-                if (gctx->config.snooze_enabled)
+                if (ctrl && gctx->config.snooze_enabled)
                     return STATE_SNOOZE;
                 break;
             case XK_s: // Skip
-                if (gctx->config.skip_enabled && ctrl)
+                if (ctrl && gctx->config.skip_enabled)
                     return STATE_RESTART;
                 break;
             case XK_q: // Quit
@@ -1078,6 +1078,8 @@ static GlobalState warning_on_event(GlobalContext *gctx, XEvent *event, void *ud
 
 static GlobalState warning_on_exit(GlobalContext *gctx, GlobalState state, void *ud)
 {
+    (void)gctx, (void)ud;
+
     switch (state)
     {
         case STATE_BREAK: 
@@ -1087,6 +1089,8 @@ static GlobalState warning_on_exit(GlobalContext *gctx, GlobalState state, void 
             return state;
         case STATE_RESTART: // Skip
             return state;
+        default:
+            break;
     }
     return STATE_EXIT;
 }
@@ -1127,6 +1131,8 @@ static GlobalState process_warning(GlobalContext *gctx)
 
 static void break_on_frame(GlobalContext *gctx, double elapsed, double duration, void *ud)
 {
+    (void)ud;
+
     double time_left = duration - elapsed;
     double progress = elapsed / duration;
 
@@ -1141,7 +1147,7 @@ static GlobalState break_on_event(GlobalContext *gctx, XEvent *event, void *ud)
     (void)ud;
 
     int ctrl = event->xkey.state & ControlMask;
-    int shift = event->xkey.state & ShiftMask;
+    // int shift = event->xkey.state & ShiftMask;
 
     if (event->type == ButtonPress)
     {
@@ -1153,11 +1159,11 @@ static GlobalState break_on_event(GlobalContext *gctx, XEvent *event, void *ud)
         switch (key)
         {
             case XK_s: // Skip
-                if (gctx->config.stop_enabled && ctrl)
+                if (ctrl && gctx->config.stop_enabled)
                     return STATE_RESTART;
                 break;
             case XK_q: // Quit
-                if (gctx->config.stop_enabled && ctrl)
+                if (ctrl && gctx->config.stop_enabled)
                     return STATE_EXIT;
                 break;
         }
@@ -1188,6 +1194,8 @@ static GlobalState break_on_exit(GlobalContext *gctx, GlobalState state, void *u
         {
             return state;
         }
+        default:
+            break;
     }
     return STATE_EXIT;
 }
@@ -1266,6 +1274,7 @@ static GlobalState process_end(GlobalContext *gctx)
         if (event.type == KeyPress) 
         {
             KeySym key = XLookupKeysym(&event.xkey, 0);
+            (void) key;
             break;
         }
     }
@@ -1360,6 +1369,8 @@ int main(int argc, char **argv)
                 break;
             case STATE_END:
                 state = process_end(&gctx);
+                break;
+            default:
                 break;
         }
     }

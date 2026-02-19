@@ -4,9 +4,18 @@ Simple configurable break timer for Xserver that reminds you to rest.
 
 ![screenshot](https://0x405.ru/xrest/screenshot_a.png) ![screenshot](https://0x405.ru/xrest/screenshot_b.png)
 
+## Features
+
+- Reminds you to rest
+- Full keyboard controls
+- Sound notifications
+- Input and/or Output block
+- Wide range of configuration options
+- Idle detection
+
 ## Build
 
-Install dependencies.
+### Install dependencies.
 
 Example for Ubuntu/Debian:
 
@@ -15,12 +24,19 @@ sudo apt update
 sudo apt install libx11-dev libxft-dev libxss-dev
 ```
 
+Example for Arch linux:
+
+```bash
+sudo pacman -S libx11 libxft libxss libao
+```
+
 Example for Alpine Linux:
+
 ```bash
 doas apk add libx11-dev libxft-dev libxscrnsaver-dev
 ```
 
-Build application:
+### Build application:
 
 ```bash
 make
@@ -42,11 +58,11 @@ Example config with defaults:
 # Text on the break screen
 break_title_text = "Break time!"
 break_message_text = "Rest your eyes. Stretch your legs. Breathe. Relax."
-break_hint_text = "s - stop, q - quit"
+break_hint_text = "^S - stop, ^Q - quit"
 
 # Text on the warning screen
 warning_message_text = "Please, take a break!"
-warning_hint_text = "space - start, w - snooze, s - skip, q - quit"
+warning_hint_text = "^Space - start, ^W - snooze, ^S - skip, ^Q - quit"
 
 # Text on the end screen
 end_title_text = "Break has ended!"

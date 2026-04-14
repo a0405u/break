@@ -16,9 +16,13 @@
 #include <time.h>
 #include <poll.h>
 #include <stdbool.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #include "main.h"
 #include "timer.h"
+
+#define STATE_FILE "/tmp/xrest"
 
 /*
     To Do:
@@ -36,7 +40,6 @@
     - Feature: Hard stop by solving puzzle / pressing long combination / writing a sentence
     - Feature: Global commands with xrestc
     - Feature: System notification instead of warning?
-    - Feature: Tray icon
     - Feature: Quit from end screen
     - Refactor: Separate audio
     - Refactor: Separate config
@@ -355,6 +358,35 @@ static void load_config(Config *config)
 }
 
 
+void atomic_write(const char *path, const char *text) 
+{
+    char tmp_path[256];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+
+    int fd = open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return;
+
+    dprintf(fd, "%s\n", text);
+
+    // Ensure contents are written to disk (or tmpfs)
+    fsync(fd);
+    close(fd);
+
+    // Atomic replace
+    rename(tmp_path, path);
+}
+
+
+void write_state(const char *state, uint ta, uint tb, uint tc) {
+
+    const char state_string[128];
+    
+    snprintf(state_string, sizeof(state_string), "%s %i %i %i", state, ta, tb, tc);
+
+    atomic_write(STATE_FILE, state_string);
+}
+
+
 char *get_font_string(const char *font_name, uint font_size, const char *font_style, uint font_weight, uint font_slant)
 {
     char *fstring = "%s:style=%s:size=%u:weight=%d:slant=%d";
@@ -632,8 +664,9 @@ static void init(GlobalContext *gctx)
     gctx->screen_width  = DisplayWidth(gctx->display, gctx->screen);
     gctx->screen_height = DisplayHeight(gctx->display, gctx->screen);
 
-    gctx->frame_time = 1.0d / gctx->config.fps;
+    gctx->frame_time = 1.0 / gctx->config.fps;
 
+    gctx->next_state = 0;
     /*
     // Possible transparency
     if (XMatchVisualInfo(gctx->display, gctx->screen, 32, TrueColor, &gctx->vinfo)) 
@@ -1008,6 +1041,7 @@ GlobalState run_frame_event_loop(GlobalContext *gctx, FrameEventLoop *loop, void
 static GlobalState process_wait(GlobalContext *gctx)
 {
     printf("Waiting...\n");
+    char state[64];
 
     // If detecting idle we check it every second
     if (gctx->config.detect_idle)
@@ -1019,15 +1053,19 @@ static GlobalState process_wait(GlobalContext *gctx)
             if (info->idle / 1000u > (unsigned long)gctx->config.idle_limit)
                 t = 0; // Reset timer
             sleep(1);
+            write_state("WAIT", t, gctx->config.timer_duration - t, gctx->config.timer_duration);
         }
         XFree(info);
     }
-    // In other case we sleep whole time
     else
     {
-        sleep(gctx->config.timer_duration);
+        for (uint t = 0; t < gctx->config.timer_duration; t++)
+        {
+            sleep(1);
+            write_state("WAIT", t, gctx->config.timer_duration - t, gctx->config.timer_duration);
+        }
     }
-    
+
     if (gctx->config.warning_enabled)
         return STATE_WARNING;
 
@@ -1045,6 +1083,13 @@ static void warning_on_frame(GlobalContext *gctx, double elapsed, double duratio
     clear_window(gctx, &gctx->wctx, gctx->background_color);
     draw_progress(gctx, &gctx->wctx, progress);
     draw_warning(gctx, gctx->config.warning_message_text, gctx->config.warning_hint_text, (int)time_left, &gctx->wctx);
+
+    time_t t = time(NULL);
+    if (t >= gctx->next_state)
+    {
+        write_state("WARNING", elapsed, time_left, duration);
+        gctx->next_state = t + 1;
+    }
 }
 
 
@@ -1149,6 +1194,13 @@ static void break_on_frame(GlobalContext *gctx, double elapsed, double duration,
     clear_window(gctx, &gctx->wctx, gctx->background_color);
     draw_progress(gctx, &gctx->wctx, progress);
     draw_message(gctx, gctx->config.break_title_text, gctx->config.break_message_text, gctx->config.break_hint_text, time_left, &gctx->wctx);
+
+    time_t t = time(NULL);
+    if (t >= gctx->next_state)
+    {
+        write_state("BREAK", elapsed, time_left, duration);
+        gctx->next_state = t + 1;
+    }
 }
 
 
@@ -1278,6 +1330,8 @@ static GlobalState process_end(GlobalContext *gctx)
 
     XEvent event;
 
+    write_state("END", 0, 0, 0);
+
     while (true) 
     {
         XNextEvent(gctx->display, &event);
@@ -1302,8 +1356,13 @@ static GlobalState process_snooze(GlobalContext *gctx)
     XDestroyWindow(gctx->display, gctx->wctx.window);
     // XSetInputFocus(gctx->display, gctx->last_focus, RevertToParent, CurrentTime);
     XFlush(gctx->display);
-    sleep(gctx->config.snooze_duration);
-        
+
+    for (uint t = 0; t < gctx->config.snooze_duration; t++)
+    {
+        sleep(1);
+        write_state("SNOOZE", t, gctx->config.snooze_duration - t, gctx->config.snooze_duration);
+    }
+
     if (gctx->config.warning_enabled)
         return STATE_WARNING;
 

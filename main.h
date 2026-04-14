@@ -122,6 +122,8 @@ typedef struct gctx
 
     double frame_time;
     double progress;
+
+    time_t next_state;
 } GlobalContext;
 
 
